@@ -9,6 +9,7 @@ import { platformIntegrations } from "@shared/schema";
 import { profileFocusDescriptionSchema, timezoneSchema } from "@shared/profile-preferences";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
+import { TONE_VALUES } from "@shared/editorial";
 import { filterEnabledPlatforms } from "../lib/platformAvailability";
 import { searchEditionSchema } from "@shared/search-editions";
 import { getEmailPreferences, updateEmailPreferences } from "../services/email/preferences";
@@ -22,7 +23,7 @@ const profilePatchSchema = z.object({
   timezone: timezoneSchema.optional(),
   enabledPlatforms: z.array(z.enum(PUBLISHING_PLATFORM_KEYS)).optional(),
   defaultPlatform: z.enum(PUBLISHING_PLATFORM_KEYS).optional(),
-  defaultTone: z.enum(["professional", "authoritative", "contrarian", "ai-recommended"]).optional(),
+  defaultTone: z.enum(TONE_VALUES).optional(),
   preferredPublishTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
   requirePublishReview: z.boolean().optional(),
   autoPublish: z.boolean().optional(),

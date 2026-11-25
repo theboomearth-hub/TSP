@@ -1,5 +1,7 @@
 import { storage, type TenantScope } from "../storage";
 import { findPooledArticle } from "./articlePool";
+import { findTopicStory } from "../repositories/topicBriefs";
+import type { TopicOutlet } from "@shared/topic-stories";
 import { fetchNewsHeadlines, type NewsHeadline } from "./keywordSearch";
 import { publicationDate } from "./articleDates";
 import type { FetchedArticle } from "./urlFetcher";
@@ -9,7 +11,11 @@ import type { FetchedArticle } from "./urlFetcher";
  * that Discover already holds, plus other outlets' headlines on it. Used when the page itself is
  * paywalled, blocked or hidden behind a Google News link, so "Write a post" never dead-ends.
  */
-export interface StorySignal { title: string; source: string; url: string; snippet: string; publishedAt: string | null }
+export interface StorySignal {
+  title: string; source: string; url: string; snippet: string; publishedAt: string | null;
+  /** Other outlets already known to cover it (a topic search grouped them); no search is needed then. */
+  alsoCoveredBy?: TopicOutlet[];
+}
 export interface StoryReference { title: string; source: string; url: string }
 export type StoryBrief = FetchedArticle & { references: StoryReference[] };
 
@@ -61,13 +67,18 @@ function dayLabel(value: string | null): string {
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 }
 
-/** What Discover already knows about a link: the person's own copy first, then the shared index. Never throws. */
+/**
+ * What is already known about a link: the person's own Discover copy, then a story from one of their
+ * topic searches, then the shared index. Never throws.
+ */
 export async function knownStory(scope: TenantScope, url: string): Promise<StorySignal | null> {
   const item = await Promise.resolve().then(() => storage.getInboxItemByUrl(scope, url)).catch(() => undefined);
   if (item?.headline?.trim() && item.source?.trim()) {
     return { title: withoutOutletSuffix(item.headline, item.source), source: item.source.trim(), url,
       snippet: item.summary ?? "", publishedAt: item.publishedAt ? new Date(item.publishedAt).toISOString() : null };
   }
+  const picked = await Promise.resolve().then(() => findTopicStory(scope, url)).catch(() => undefined);
+  if (picked) return { title: picked.title, source: picked.source, url, snippet: picked.snippet, publishedAt: picked.publishedAt, alsoCoveredBy: picked.alsoCoveredBy };
   const pooled = await findPooledArticle(url).catch(() => null);
   if (pooled?.title.trim() && pooled.source.trim()) {
     return { title: withoutOutletSuffix(pooled.title, pooled.source), source: pooled.source.trim(), url,
@@ -110,9 +121,12 @@ export function storyBrief(story: StorySignal, related: readonly NewsHeadline[])
     const day = dayLabel(headline.publishedAt);
     lines.push(`Related coverage, ${headline.source}${day ? ` (${day})` : ""}: ${clean(headline.title)}`);
   }
+  const covering = (story.alsoCoveredBy ?? []).filter(outlet => outlet.source.toLowerCase() !== story.source.toLowerCase());
+  if (covering.length) lines.push(`Also covered by ${listOf(covering.map(outlet => outlet.source))}.`);
   const content = lines.join("\n\n");
   const references: StoryReference[] = [{ title: clean(story.title), source: story.source, url: story.url },
-    ...related.flatMap(headline => headline.link ? [{ title: clean(headline.title), source: headline.source, url: headline.link }] : [])];
+    ...related.flatMap(headline => headline.link ? [{ title: clean(headline.title), source: headline.source, url: headline.link }] : []),
+    ...covering.map(outlet => ({ title: "Coverage of the same story", source: outlet.source, url: outlet.url }))];
   let domain = "";
   try { domain = new URL(story.url).hostname.replace(/^www\./, ""); } catch { /* the link was validated upstream */ }
   return {
@@ -122,11 +136,16 @@ export function storyBrief(story: StorySignal, related: readonly NewsHeadline[])
   };
 }
 
+function listOf(names: string[]): string {
+  return names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+}
+
 /** A brief for a link Discover knows, or null when nothing is known about it. Only an abort throws. */
 export async function storyBriefFor(scope: TenantScope, url: string, signal: AbortSignal): Promise<StoryBrief | null> {
   const story = await knownStory(scope, url);
   signal.throwIfAborted();
   if (!story) return null;
+  if (story.alsoCoveredBy?.length) return storyBrief(story, []);
   const profile = await Promise.resolve().then(() => storage.getUserProfile(scope)).catch(() => undefined);
   const related = await relatedCoverage(story, profile?.searchEdition ?? "en-US", signal);
   signal.throwIfAborted();

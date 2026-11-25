@@ -46,7 +46,21 @@ describe("billing period and transition rules", () => {
 describe("expiry-aware catalog entitlements", () => {
   it("denies inactive paid catalog entries even during a paid period", () => expect(resolveTenantEntitlements([{ ...pro, isActive: false }], [active], now).canPublish).toBe(false));
   it("does not invent free access when the catalog is missing", () => expect(resolveTenantEntitlements([], [], now)).toMatchObject({ planKey: "unavailable", canPublish: false, canSchedule: false, canUseAnalytics: false, maxDailyGenerations: 0 }));
-  it("uses the actual free tier but never gives it paid capabilities", () => expect(resolveTenantEntitlements([free, pro], [], now)).toMatchObject({ planKey: "free", canPublish: false, canSchedule: false, canUseAnalytics: false, maxDailyGenerations: 3 }));
+  it("uses the actual free tier but never gives it paid capabilities", () => expect(resolveTenantEntitlements([free, pro], [], now)).toMatchObject({ planKey: "free", canPublish: false, canSchedule: false, canUseAnalytics: false, maxDailyGenerations: null }));
+  it("caps free drafts only when FREE_DAILY_GENERATIONS is a positive whole number", () => {
+    const original = process.env.FREE_DAILY_GENERATIONS;
+    try {
+      for (const [value, expected] of [["5", 5], ["", null], ["0", null], ["-3", null], ["2.5", null], ["lots", null]] as const) {
+        process.env.FREE_DAILY_GENERATIONS = value;
+        expect(resolveTenantEntitlements([free, pro], [], now)).toMatchObject({ planKey: "free", canPublish: false, maxDailyGenerations: expected });
+      }
+      // A paid plan is never capped by the free setting.
+      process.env.FREE_DAILY_GENERATIONS = "5";
+      expect(resolveTenantEntitlements([free, pro], [active], now).maxDailyGenerations).toBeNull();
+    } finally {
+      if (original === undefined) delete process.env.FREE_DAILY_GENERATIONS; else process.env.FREE_DAILY_GENERATIONS = original;
+    }
+  });
   it("preserves paid access until the exclusive expiry boundary after scheduled cancellation", () => {
     const row = { ...active, cancelAtPeriodEnd: true };
     expect(resolveTenantEntitlements([free, pro], [row], now).canPublish).toBe(true);
@@ -85,9 +99,12 @@ describe("expiry-aware catalog entitlements", () => {
   it("enforces every capability and requires usage for limited generation", () => {
     const missing = resolveTenantEntitlements([], [], now);
     for (const capability of ["publish", "schedule", "analytics", "generate"] as const) expect(() => assertResolvedEntitlement(missing, capability, 0)).toThrow();
-    const limits = resolveTenantEntitlements([free], [], now);
+    // With a free cap set (FREE_DAILY_GENERATIONS), usage must be known and below it.
+    const limits = { ...resolveTenantEntitlements([free], [], now), maxDailyGenerations: 3 };
     for (const count of [undefined, NaN, -1, 3, 4]) expect(() => assertResolvedEntitlement(limits, "generate", count)).toThrow();
     expect(() => assertResolvedEntitlement(limits, "generate", 2)).not.toThrow();
+    // Without one, free drafts are unlimited.
+    expect(() => assertResolvedEntitlement(resolveTenantEntitlements([free], [], now), "generate", 500)).not.toThrow();
     const paid = resolveTenantEntitlements([pro], [active], now);
     for (const capability of ["publish", "schedule", "analytics", "generate"] as const) expect(() => assertResolvedEntitlement(paid, capability)).not.toThrow();
   });

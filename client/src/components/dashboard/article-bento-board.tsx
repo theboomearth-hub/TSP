@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MAX_CREATION_REFERENCES } from "@shared/creation-session";
+import { TOPIC_LIMITS, type TopicBriefResponse } from "@shared/topic-stories";
+import { findTopicStories, storyMeta } from "@/lib/topic-compose";
 import { SocialPreviewCard } from "./social-preview-card";
 import { EditorialDetails, EditorialProgress, SourceReview } from "./editorial-details";
 import { WorkflowStatus } from "./workflow-status";
@@ -46,6 +48,19 @@ export function ArticleBentoBoard({ composer: c }: Readonly<{ composer: CreatePo
   const [panel, setPanel] = useState<Action>();
   useAppTourSignal("platforms-opened", panel === "platforms");
   const [search, setSearch] = useState("");
+  // Attach news on any topic, not only stories already in Discover (kept 24 hours on the server).
+  const [topicQuery, setTopicQuery] = useState("");
+  const [topicBrief, setTopicBrief] = useState<TopicBriefResponse>();
+  const [topicSearching, setTopicSearching] = useState(false);
+  const [topicError, setTopicError] = useState("");
+  const searchTopic = async () => {
+    const topic = topicQuery.trim();
+    if (topic.length < TOPIC_LIMITS.minChars || topicSearching) return;
+    setTopicSearching(true); setTopicError("");
+    try { setTopicBrief(await findTopicStories(topic)); }
+    catch (error) { setTopicError(error instanceof Error && error.message ? error.message : "Couldn't look for stories. Try again."); }
+    finally { setTopicSearching(false); }
+  };
   const [link, setLink] = useState("");
   const [conversationOpen, setConversationOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(true);
@@ -341,6 +356,23 @@ export function ArticleBentoBoard({ composer: c }: Readonly<{ composer: CreatePo
       <DialogContent className="max-h-[85dvh] w-[calc(100%-1rem)] max-w-2xl overflow-y-auto">
         <DialogHeader><DialogTitle>{panelTitle}</DialogTitle><DialogDescription>{(panel && panelDescriptions[panel]) ?? "Keep the document in focus. Change options here without generating automatically."}</DialogDescription></DialogHeader>
         {panel === "sources" && <div className="space-y-3">
+          <section aria-label="News on a topic" className="space-y-2 rounded-md border p-3">
+            <form className="flex gap-2" onSubmit={event => { event.preventDefault(); void searchTopic(); }}>
+              <Input aria-label="Topic to search" placeholder="Find news on a topic, e.g. retail media in India" value={topicQuery} maxLength={TOPIC_LIMITS.maxChars} onChange={event => setTopicQuery(event.target.value)} />
+              <Button type="submit" variant="outline" disabled={topicSearching || topicQuery.trim().length < TOPIC_LIMITS.minChars}>{topicSearching ? "Searching…" : "Find stories"}</Button>
+            </form>
+            {topicError && <p role="alert" className="text-sm text-destructive">{topicError}</p>}
+            {topicBrief && (topicBrief.stories.length ? <fieldset aria-label="Stories on this topic" className="max-h-56 space-y-2 overflow-y-auto" disabled={locked || Boolean(c.chat.pending)}>
+              {topicBrief.stories.map(story => {
+                const checked = c.chat.referenceUrls.includes(story.url);
+                return <label key={story.id} className={`flex cursor-pointer items-start gap-3 rounded-md border p-2.5 ${checked ? "border-primary bg-primary/5" : ""}`}>
+                  <input type="checkbox" checked={checked} disabled={!checked && c.chat.referenceUrls.length >= MAX_CREATION_REFERENCES} className="mt-1 h-4 w-4 shrink-0 accent-primary"
+                    onChange={() => c.setChatReferences(checked ? c.chat.referenceUrls.filter(url => url !== story.url) : [...c.chat.referenceUrls, story.url])} />
+                  <span className="min-w-0"><span className="block break-words text-sm font-medium">{story.title}</span><span className="mt-1 block text-xs text-muted-foreground">{storyMeta(story)}</span></span>
+                </label>;
+              })}
+            </fieldset> : <p role="status" className="text-sm text-muted-foreground">No recent stories on this topic. Describe your idea in the message box instead.</p>)}
+          </section>
           <Input aria-label="Search crawled articles" placeholder="Search titles or publications..." value={search} onChange={event => setSearch(event.target.value)} />
           <p className="text-sm text-muted-foreground">Select up to {MAX_CREATION_REFERENCES} articles. Pundit reads the selected sources together when you send a suggestion.</p>
           {c.inboxLoading && <p role="status">Loading articles...</p>}

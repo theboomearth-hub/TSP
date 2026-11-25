@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type D
 import { Link, useLocation, useSearch } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
-  AlertTriangle, Archive, CalendarDays, Clock, Eye, FileText, Inbox, Lightbulb, Linkedin, Menu, Pencil, Plus, Rss, Search, Send, Settings, Sparkles, Star, StickyNote, Tag, Trash2, X, CalendarClock,
+  AlertTriangle, Archive, CalendarDays, Clock, Eye, FileText, Inbox, Lightbulb, Linkedin, Menu, Pencil, PenLine, Plus, Rss, Search, Send, Settings, Sparkles, Star, StickyNote, Tag, Trash2, X, CalendarClock,
 } from "lucide-react";
 import { useIsSignedIn } from "@/lib/dev-auth";
 import { ComposerProvider, useComposer } from "@/components/inbox/composer";
@@ -97,7 +97,7 @@ function ShellFrame({ children, panel, setPanel }: Readonly<{ children: ReactNod
         </header>
         <div className="flex min-h-0 flex-1">
           <div className={cn("hidden shrink-0 overflow-y-auto lg:block", navCollapsed ? "w-[4.5rem]" : "w-60")}>
-            <InboxNav collapsed={navCollapsed} location={location} search={search} signedIn={signedIn} onCompose={openCompose} />
+            <InboxNav collapsed={navCollapsed} location={location} search={search} signedIn={signedIn} onCompose={openCompose} onWriteAbout={topic => composer.openTopic(topic)} />
           </div>
           <div className="min-h-0 min-w-0 flex-1 overflow-hidden border-t bg-card lg:mb-2 lg:rounded-md lg:border" id="workspace-content">{children}</div>
           {panel && <ConnectorPanel panel={panel} onClose={() => setPanel(null)} />}
@@ -110,7 +110,8 @@ function ShellFrame({ children, panel, setPanel }: Readonly<{ children: ReactNod
       <Sheet open={navOpen} onOpenChange={setNavOpen}>
         <SheetContent side="left" className="w-72 overflow-y-auto p-0">
           <SheetHeader className="sr-only"><SheetTitle>Folders</SheetTitle><SheetDescription>Inbox folders, topic labels and your focus.</SheetDescription></SheetHeader>
-          <InboxNav collapsed={false} location={location} search={search} signedIn={signedIn} onCompose={() => { setNavOpen(false); openCompose(); }} />
+          <InboxNav collapsed={false} location={location} search={search} signedIn={signedIn} onCompose={() => { setNavOpen(false); openCompose(); }}
+            onWriteAbout={topic => { setNavOpen(false); composer.openTopic(topic); }} />
         </SheetContent>
       </Sheet>
       <Dialog open={shortcutsOpen} onOpenChange={setShortcutsOpen}>
@@ -125,7 +126,7 @@ function ShellFrame({ children, panel, setPanel }: Readonly<{ children: ReactNod
   );
 }
 
-function InboxNav({ collapsed, location, search, signedIn, onCompose }: Readonly<{ collapsed: boolean; location: string; search: string; signedIn: boolean; onCompose: () => void }>) {
+function InboxNav({ collapsed, location, search, signedIn, onCompose, onWriteAbout }: Readonly<{ collapsed: boolean; location: string; search: string; signedIn: boolean; onCompose: () => void; onWriteAbout: (topic: string) => void }>) {
   const profile = useQuery<UserProfile>({ queryKey: ["/api/profile"], enabled: signedIn });
   const active = useQuery(inboxStatusQuery("active", signedIn));
   const saved = useQuery(inboxStatusQuery("saved", signedIn));
@@ -173,9 +174,13 @@ function InboxNav({ collapsed, location, search, signedIn, onCompose }: Readonly
         </div>
         {labels.length ? <ul className="space-y-0.5">{labels.map(label => {
           const selected = current?.label === label;
-          return <li key={label}><Link href={inboxHref({ folder: "inbox", tab: "stories", label })} className={cn(item, "rounded-r-md pl-6", selected && "bg-primary/10 font-semibold text-primary")} aria-current={selected ? "page" : undefined}>
+          return <li key={label} className="group relative"><Link href={inboxHref({ folder: "inbox", tab: "stories", label })} className={cn(item, "rounded-r-md pl-6 pr-9", selected && "bg-primary/10 font-semibold text-primary")} aria-current={selected ? "page" : undefined}>
             <Tag className="h-4 w-4 shrink-0" aria-hidden="true" /><span className="truncate">{label}</span>
-          </Link></li>;
+          </Link>
+            {/* Write a post about this topic: Compose opens with related stories already looked up. */}
+            <button type="button" onClick={() => onWriteAbout(label)} aria-label={`Write about ${label}`} title={`Write about ${label}`}
+              className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring group-hover:opacity-100">
+              <PenLine className="h-3.5 w-3.5" aria-hidden="true" /></button></li>;
         })}</ul> : <p className="px-6 py-1 text-xs text-muted-foreground">Add topics in Settings to filter by label.</p>}
         <section className="mx-3 mt-auto rounded-md border border-dashed bg-card p-3 text-xs" aria-label="Your focus">
           <p className="font-semibold uppercase tracking-wide text-muted-foreground">Your focus</p>

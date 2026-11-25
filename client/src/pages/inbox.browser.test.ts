@@ -62,7 +62,12 @@ beforeAll(async () => {
         }
         if (url === "/api/profile") return json({ userId: "user", tenantId: "tenant", focusDescription: "I advise D2C brands on retail media.", keywords: [{ keyword: "Retail media", weight: 0.9 }], requirePublishReview: true, defaultTone: "professional", ...window.__profile });
         if (url === "/api/integrations/linkedin/status") return json(window.__linkedin ?? { provider: "linkedin", connected: true, assessment: { canPublish: true, status: "connected" } });
-        if (method === "POST" && /^\\/api\\/instant-review\\/(manual|selected)$/.test(url)) return json({ posts: { linkedin: { [body.tones[0]]: "Generated LinkedIn post about " + (body.title || body.url) } } });
+        if (method === "POST" && /^\\/api\\/instant-review\\/(manual|selected)$/.test(url)) return json({ posts: { linkedin: { [body.tones[0]]: "Generated LinkedIn post about " + (body.title || body.url) } }, evidence: { warnings: window.__writeWarnings ?? [] } });
+        // Topic-first writing: related stories per topic, angle ideas, recent topics and Shortlist saves.
+        if (url === "/api/topics/recent") return json({ topics: window.__recentTopics ?? [] });
+        if (method === "POST" && url === "/api/topics/related") return json({ briefId: "5d2c4b7e-1f0a-4c6b-9a8e-2b3c4d5e6f70", topic: body.topic, searchedFor: body.topic, stories: (window.__topicStories ?? {})[body.topic] ?? [], expiresAt: new Date(Date.now() + 86400000).toISOString() });
+        if (method === "POST" && /^\\/api\\/topics\\/[^/]+\\/angles$/.test(url)) return json({ angles: window.__angles ?? [] });
+        if (method === "POST" && url === "/api/search/news/save") return json({ id: "saved-" + window.__calls.length, status: "saved", articleUrl: body.url });
         const draftId = url.match(/^\\/api\\/drafts\\/([^/?]+)/)?.[1];
         const stamp = () => new Date(Date.now() + (window.__tick = (window.__tick || 0) + 1)).toISOString();
         if (method === "GET" && url.startsWith("/api/drafts?")) return json(window.__drafts ?? []);
@@ -415,6 +420,111 @@ describe("LinkedIn composer and one-click posting", () => {
     await window_.getByTestId("compose-body").fill("x".repeat(3001));
     await browserExpect(window_.getByTestId("button-compose-post")).toBeDisabled();
     await window_.getByRole("button", { name: "Restore previous text" }).count();
+  });
+});
+
+describe("Writing tones", () => {
+  it("offers all eleven tones in Compose and writes and saves in the one chosen", async () => {
+    await mount();
+    await page.getByTestId("button-inbox-compose").click();
+    const window_ = page.getByTestId("compose-float");
+    await window_.getByRole("button", { name: "Thought Leader" }).click();
+    const options = page.getByRole("menuitemradio");
+    await browserExpect(options).toHaveText(["Thought Leader", "Industry Insider", "Provocateur", "Data-Driven", "Storyteller", "Educator", "Conversational", "Executive Brief", "Balanced Analyst", "Optimist", "Witty"]);
+    await page.getByRole("menuitemradio", { name: "Executive Brief" }).click();
+    await window_.getByRole("textbox", { name: "Your take" }).fill("Most dashboards compare different definitions of success.");
+    await window_.getByTestId("button-help-me-write").click();
+    await browserExpect(window_.getByTestId("compose-body")).toHaveValue(/^Generated LinkedIn post/);
+    const [generation] = await calls("POST", /instant-review\/manual$/);
+    expect(generation.body).toMatchObject({ tones: ["executiveBrief"] });
+    // Compose autosaves 1.2 s after writing.
+    await expect.poll(async () => (await calls("POST", /^\/api\/drafts$/)).map(call => (call.body as { tone?: string }).tone), { timeout: 4000 }).toEqual(["executive-brief"]);
+  });
+});
+
+describe("Writing from a topic", () => {
+  const topicStory = (id: string, title: string, source: string, extra: object = {}) => ({ id, title, source, url: `https://${source.toLowerCase().replace(/\W/g, "")}.test/${id}`,
+    snippet: "", publishedAt: new Date().toISOString(), alsoCoveredBy: [], fullText: false, origin: "news", ...extra });
+  const stories = [
+    topicStory("s1", "Vistar launches programmatic DOOH marketplace in India", "Campaign", { alsoCoveredBy: [{ source: "Adgully", url: "https://adgully.test/v" }], fullText: true }),
+    topicStory("s2", "Agencies ask for shared DOOH measurement", "Exchange4Media", { origin: "discover" }),
+    topicStory("s3", "Programmatic DOOH spend rises", "Media4Growth"),
+    topicStory("s4", "Outdoor screens add audience data", "Mint"),
+  ];
+  const compose = () => page.getByTestId("compose-float");
+  async function searchTopic(topic: string, extra: object) {
+    await mount("/dashboard", { extra });
+    await page.getByTestId("button-inbox-compose").click();
+    await compose().getByRole("textbox", { name: "Topic" }).fill(topic);
+    await compose().getByRole("textbox", { name: "Topic" }).press("Enter");
+  }
+
+  it("finds related stories for a one-liner, writes from the ticked ones with an angle, and says what the post is based on", async () => {
+    await searchTopic("programmatic DOOH", { __topicStories: { "programmatic DOOH": stories }, __angles: [{ title: "Measurement is the real blocker", why: "", storyIds: ["s2"] }],
+      __writeWarnings: [{ code: "headlines_only", message: "Written from headlines" }] });
+    const related = compose().getByRole("region", { name: "Related stories" });
+    await browserExpect(related.getByRole("checkbox")).toHaveCount(4);
+    // The best three are ticked; every story says where it comes from.
+    await browserExpect(related.getByRole("checkbox", { name: /Vistar launches/ })).toBeChecked();
+    await browserExpect(related.getByRole("checkbox", { name: /Outdoor screens/ })).not.toBeChecked();
+    await browserExpect(related).toContainText("Campaign");
+    await browserExpect(related).toContainText("+1 outlet · Full text");
+    await browserExpect(related).toContainText("In your Discover");
+    const [search] = await calls("POST", /\/api\/topics\/related$/);
+    expect(search.body).toEqual({ topic: "programmatic DOOH" });
+    // An angle idea fills the Angle line and ticks the story behind it.
+    await compose().getByRole("group", { name: "Angle ideas" }).getByRole("button", { name: "Measurement is the real blocker" }).click();
+    await browserExpect(compose().getByLabel("Angle", { exact: true })).toHaveValue("Measurement is the real blocker");
+    await browserExpect(related.getByRole("checkbox", { name: /Vistar launches/ })).not.toBeChecked();
+    await related.getByRole("checkbox", { name: /Programmatic DOOH spend/ }).check();
+    await compose().getByRole("button", { name: /^Post shape/ }).click();
+    await page.getByRole("menuitemradio", { name: "Roundup" }).click();
+    await compose().getByTestId("button-help-me-write").click();
+    await browserExpect(compose().getByTestId("compose-body")).toHaveValue("Generated LinkedIn post about programmatic DOOH");
+    const [generation] = await calls("POST", /instant-review\/manual$/);
+    expect(generation.body).toMatchObject({ title: "programmatic DOOH", content: "", shape: "roundup", userContext: "Angle: Measurement is the real blocker",
+      topicBrief: { id: "5d2c4b7e-1f0a-4c6b-9a8e-2b3c4d5e6f70", storyIds: ["s2", "s3"] } });
+    const writtenFrom = compose().getByTestId("compose-written-from");
+    await browserExpect(writtenFrom).toContainText("Written from headlines");
+    await browserExpect(writtenFrom).toContainText("Sources: Exchange4Media, Media4Growth");
+  });
+
+  it("writes a labelled opinion post when nothing related is found, after asking for the person's view", async () => {
+    await searchTopic("my unusual niche", { __writeWarnings: [{ code: "opinion_only", message: "Opinion" }] });
+    await browserExpect(compose()).toContainText("No recent stories on this topic");
+    await compose().getByTestId("button-help-me-write").click();
+    await browserExpect(compose()).toContainText("Add your view in a sentence or two to write an opinion post.");
+    expect(await calls("POST", /instant-review/)).toEqual([]);
+    await compose().getByRole("textbox", { name: "Your take" }).fill("Small teams should share one measurement standard.");
+    await compose().getByTestId("button-help-me-write").click();
+    await browserExpect(compose().getByTestId("compose-written-from")).toContainText("Opinion, no sources");
+    const [generation] = await calls("POST", /instant-review\/manual$/);
+    expect(generation.body).toMatchObject({ title: "my unusual niche", opinionOnly: true, sourceLabel: "Your view", content: "my unusual niche\n\nSmall teams should share one measurement standard." });
+    expect(generation.body).not.toHaveProperty("topicBrief");
+  });
+
+  it("keeps a story in the Shortlist only when asked", async () => {
+    await searchTopic("programmatic DOOH", { __topicStories: { "programmatic DOOH": stories } });
+    const related = compose().getByRole("region", { name: "Related stories" });
+    await browserExpect(related.getByRole("checkbox")).toHaveCount(4);
+    expect(await calls("POST", /\/api\/search\/news\/save$/)).toEqual([]);
+    await related.getByRole("button", { name: "Save to Shortlist: Programmatic DOOH spend rises" }).click();
+    await browserExpect(related.getByRole("button", { name: "Saved to Shortlist: Programmatic DOOH spend rises" })).toBeDisabled();
+    const [save] = await calls("POST", /\/api\/search\/news\/save$/);
+    expect(save.body).toMatchObject({ url: "https://media4growth.test/s3", title: "Programmatic DOOH spend rises", source: "Media4Growth" });
+  });
+
+  it("suggests recent topics and Labels, searches as soon as the person pauses typing, and writes about a Label from the menu", async () => {
+    await mount("/dashboard", { extra: { __recentTopics: ["Retail media in India"], __topicStories: { "Retail media": stories.slice(0, 2), "retail media agencies": stories.slice(2) } } });
+    await page.getByTestId("button-inbox-compose").click();
+    const suggestions = compose().getByRole("group", { name: "Topic suggestions" });
+    await browserExpect(suggestions.getByRole("button")).toHaveText(["Retail media in India", "Retail media"]);
+    await compose().getByRole("textbox", { name: "Topic" }).fill("retail media agencies");
+    await browserExpect(compose().getByRole("region", { name: "Related stories" }).getByRole("checkbox")).toHaveCount(2, { timeout: 5000 });
+    await compose().getByRole("button", { name: "Save and close" }).click();
+    await page.getByRole("button", { name: "Write about Retail media" }).click();
+    await browserExpect(compose().getByRole("textbox", { name: "Topic" })).toHaveValue("Retail media");
+    await browserExpect(compose().getByRole("region", { name: "Related stories" }).getByRole("checkbox")).toHaveCount(2);
   });
 });
 

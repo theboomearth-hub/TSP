@@ -5,6 +5,7 @@ import { redis } from "../lib/redis";
 import { queueOptions } from "./queue";
 import type { TenantScope } from "../storage";
 import { executeEditorialRequest, type PreparedEditorialRequest } from "../services/editorial-request";
+import { TopicBriefUnavailableError, topicBriefFailure } from "../services/topicBriefError";
 import { AIGenerationError, getAIErrorResponse, getEditorialModelIdentity } from "../services/openRouter";
 import { CrawlError, sourceFailureBody } from "../services/crawlerFetch";
 import { resolveTenantContext } from "../services/tenancy";
@@ -171,8 +172,8 @@ export class EditorialJobs {
   }
 
   private async fail(id: string, error: unknown) {
-    const failure = error instanceof CrawlError
-      ? { status: 422, body: sourceFailureBody(error) }
+    const failure = error instanceof CrawlError ? { status: 422, body: sourceFailureBody(error) }
+      : error instanceof TopicBriefUnavailableError ? topicBriefFailure(error)
       : generationAccessFailure(error) ?? getAIErrorResponse(error);
     await this.store.eval(editorialScripts.finish, 2, recordKey(id), cancelKey(id), id, "failed", "error", JSON.stringify(failure), EDITORIAL_RESULT_TTL);
   }
@@ -214,7 +215,7 @@ export class EditorialJobs {
       const scope = { tenantId: record.tenantId, userId: record.userId };
       // Trusted persisted owner, never a payload-supplied scope.
       prepared.options = { voice: prepared.options.voice, format: prepared.options.format, userContext: prepared.options.userContext,
-        scope: { tenantId: scope.tenantId }, voiceScope: scope };
+        ...(prepared.options.shape ? { shape: prepared.options.shape } : {}), scope: { tenantId: scope.tenantId }, voiceScope: scope };
       const completed = new Set<string>();
       const serialized = await runGeneration(scope, generationOperationId(prepared.input.requestIntent ?? id),
         "url" in prepared.input ? "selected" : "manual", prepared.input, controller.signal, async () => {

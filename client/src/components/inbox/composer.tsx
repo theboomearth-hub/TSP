@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { CalendarClock, ChevronDown, Maximize2, Minimize2, Minus, MoreVertical, Reply, Sparkles, Square, Trash2, Undo2, X, Linkedin } from "lucide-react";
+import { Bookmark, BookmarkCheck, CalendarClock, ChevronDown, Maximize2, Minimize2, Minus, MoreVertical, Reply, Search, Sparkles, Square, Trash2, Undo2, X, Linkedin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -20,8 +20,12 @@ import { UNDO_SECONDS_EVENT } from "@/lib/inbox-feedback";
 import { trackInbox } from "@/lib/inbox-analytics";
 import {
   cancelLinkedInSchedule, approveLinkedInDraft, definitelyNotAdmitted, generationRequest, LINKEDIN_CHARACTER_LIMIT, nextMorning, postingOutcome, publishApprovedDraft, readUndoSeconds,
-  saveLinkedInDraft, scheduleLabel, scheduleLinkedInDraft, storeUndoSeconds, toSavedDraft, UNDO_WINDOW_OPTIONS, type ComposeSource, type PostingResultKind, type SavedDraft,
+  saveLinkedInDraft, scheduleLabel, scheduleLinkedInDraft, storeUndoSeconds, toSavedDraft, UNDO_WINDOW_OPTIONS, type ComposeSource, type ComposeTopic, type PostingResultKind, type SavedDraft,
 } from "@/lib/linkedin-compose";
+import { findTopicStories, RECENT_TOPICS_KEY, saveTopicStory, storyMeta, suggestTopicAngles, writtenFromLabel } from "@/lib/topic-compose";
+import { queryClient } from "@/lib/queryClient";
+import { topicLabels } from "@shared/inbox-view";
+import { TOPIC_LIMITS, TOPIC_SHAPE_LABELS, TOPIC_SHAPES, topicWords, type TopicAngle, type TopicBriefResponse, type TopicShape } from "@shared/topic-stories";
 import { cn } from "@/lib/utils";
 import type { Draft, UserProfile } from "@shared/schema";
 
@@ -43,6 +47,20 @@ export interface Compose {
   maximized: boolean;
   /** One-shot request to focus the text, set only by explicit user actions. */
   focusToken?: number;
+  /** Topic-first writing (no source story): what to post about, and the related stories found for it. */
+  topic: string;
+  brief?: TopicBriefResponse;
+  /** Ticked story ids, in the brief's order. */
+  picked: string[];
+  searching: boolean;
+  searchError?: string;
+  angles?: TopicAngle[];
+  anglesLoading?: boolean;
+  shape: TopicShape;
+  /** Stories this person chose to keep in their Shortlist. */
+  savedStories: string[];
+  /** What the last written post was based on, shown under the text. */
+  writtenFrom?: { label: "headlines" | "opinion" | null; sources: string[] };
 }
 interface Pending { compose: Compose; left: number }
 export type OpenableDraft = Pick<Draft, "id" | "content" | "updatedAt" | "tone">;
@@ -50,6 +68,8 @@ interface ComposerValue {
   inlineFor: (sourceId: string) => Compose | undefined;
   openForStory: (source: ComposeSource, inline: boolean) => void;
   openBlank: (angle?: string) => void;
+  /** A new post about a topic, optionally with an angle: related stories are looked up straight away. */
+  openTopic: (topic: string, angle?: string) => void;
   /** Continue a saved LinkedIn draft; edits stay revision-checked against it. */
   openDraft: (draft: OpenableDraft) => void;
   /** Adds text to the compose you last used if it is on screen, else starts a new one. */
@@ -94,6 +114,13 @@ function useComposerActions(onConnectLinkedIn: () => void) {
   const saveTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const saveChains = useRef(new Map<string, Promise<void>>());
   const generations = useRef(new Map<string, AbortController>());
+  const searches = useRef(new Map<string, AbortController>());
+  const recentTopics = useQuery<{ topics: string[] }>({ queryKey: RECENT_TOPICS_KEY, enabled: signedIn, staleTime: 60_000 });
+  const topicSuggestions = useMemo(() => {
+    const seen = new Set<string>();
+    return [...(recentTopics.data?.topics ?? []), ...topicLabels(profile.data?.keywords)]
+      .filter(topic => !seen.has(topic.toLowerCase()) && Boolean(seen.add(topic.toLowerCase()))).slice(0, 6);
+  }, [recentTopics.data, profile.data?.keywords]);
 
   const commit = useCallback((next: Compose[]) => { ref.current = next; setComposes(next); }, []);
   const get = (key: string) => ref.current.find(compose => compose.key === key);
@@ -103,11 +130,13 @@ function useComposerActions(onConnectLinkedIn: () => void) {
   const remove = useCallback((key: string) => {
     clearTimeout(saveTimers.current.get(key));
     generations.current.get(key)?.abort();
+    searches.current.get(key)?.abort();
     commit(ref.current.filter(compose => compose.key !== key));
   }, [commit]);
 
   const create = (fields: Partial<Compose> & Pick<Compose, "mode">): Compose => ({
-    key: crypto.randomUUID(), angle: "", take: "", body: "", tone: toneKeyFor(profile.data?.defaultTone), saving: false, generating: false, minimized: false, maximized: false, ...fields,
+    key: crypto.randomUUID(), angle: "", take: "", body: "", tone: toneKeyFor(profile.data?.defaultTone), saving: false, generating: false, minimized: false, maximized: false,
+    topic: "", picked: [], searching: false, shape: "post", savedStories: [], ...fields,
   });
   const addWindow = (compose: Compose) => {
     const floats = ref.current.filter(item => item.mode === "float" && !item.minimized);
@@ -144,15 +173,91 @@ function useComposerActions(onConnectLinkedIn: () => void) {
     saveTimers.current.set(key, setTimeout(() => { void saveNow(key).catch(() => undefined); }, 1200));
   }, [saveNow]);
 
-  const update = (key: string, change: Partial<Pick<Compose, "angle" | "take" | "body" | "tone">>) => {
+  /** Angle ideas for the stories found; a failure just leaves them out. */
+  const loadAngles = async (key: string, briefId: string, signal: AbortSignal) => {
+    patch(key, { anglesLoading: true });
+    try {
+      const angles = await suggestTopicAngles(briefId, signal);
+      if (get(key)?.brief?.briefId === briefId) patch(key, { angles, anglesLoading: false });
+    } catch {
+      if (get(key)?.brief?.briefId === briefId) patch(key, { anglesLoading: false });
+    }
+  };
+
+  /** Related stories for the topic; the best three are ticked. Returns whether the brief is current. */
+  const searchTopic = async (key: string, topicOverride?: string): Promise<boolean> => {
+    const compose = get(key);
+    if (!compose || compose.source) return false;
+    const topic = (topicOverride ?? compose.topic).trim();
+    if (topic.length < TOPIC_LIMITS.minChars || !topicWords(topic).length) { patch(key, { searchError: "Describe the topic in a few words." }); return false; }
+    searches.current.get(key)?.abort();
+    const controller = new AbortController();
+    searches.current.set(key, controller);
+    patch(key, { topic, searching: true, searchError: undefined, angles: undefined, anglesLoading: false });
+    try {
+      const brief = await findTopicStories(topic, controller.signal);
+      if (controller.signal.aborted || get(key)?.topic.trim() !== topic) return false;
+      patch(key, { brief, picked: brief.stories.slice(0, TOPIC_LIMITS.ticked).map(story => story.id), searching: false });
+      trackInbox("topic_searched", { stories: brief.stories.length });
+      if (brief.stories.length) void loadAngles(key, brief.briefId, controller.signal);
+      return true;
+    } catch (error) {
+      if (!controller.signal.aborted && get(key)) patch(key, { searching: false, searchError: message(error, "Couldn't look for related stories. Try again.") });
+      return false;
+    } finally {
+      if (searches.current.get(key) === controller) searches.current.delete(key);
+    }
+  };
+
+  const togglePick = (key: string, storyId: string) => {
+    const compose = get(key);
+    if (!compose?.brief) return;
+    const picked = new Set(compose.picked);
+    if (picked.has(storyId)) picked.delete(storyId); else picked.add(storyId);
+    patch(key, { picked: compose.brief.stories.map(story => story.id).filter(id => picked.has(id)) });
+  };
+  /** An angle idea fills the Angle line and ticks the stories behind it. */
+  const chooseAngle = (key: string, angle: TopicAngle) => {
+    const compose = get(key);
+    if (!compose?.brief) return;
+    const behind = new Set(angle.storyIds);
+    const picked = compose.brief.stories.map(story => story.id).filter(id => behind.has(id));
+    patch(key, { angle: angle.title.slice(0, 200), ...(picked.length ? { picked } : {}) });
+  };
+  const saveStory = async (key: string, storyId: string) => {
+    const story = get(key)?.brief?.stories.find(item => item.id === storyId);
+    if (!story) return;
+    try {
+      await saveTopicStory(story);
+      patch(key, current => ({ savedStories: [...new Set([...current.savedStories, storyId])] }));
+      trackInbox("topic_story_saved");
+      toast({ title: "Saved to Shortlist", description: "Find it in Shortlist any time." });
+    } catch (error) { toast({ title: "Couldn't save the story", description: message(error, "Try again."), variant: "destructive" }); }
+  };
+
+  /** The topic part of a request: the current brief and ticked stories, once the search matches the topic. */
+  const topicFor = (compose: Compose): ComposeTopic | undefined => {
+    const brief = compose.brief;
+    if (compose.source || !brief || brief.topic !== compose.topic.trim()) return undefined;
+    return { topic: brief.topic, briefId: brief.briefId, storyIds: compose.picked, storiesFound: brief.stories.length };
+  };
+
+  const update = (key: string, change: Partial<Pick<Compose, "angle" | "take" | "body" | "tone" | "topic" | "shape">>) => {
     patch(key, change);
     if (change.body !== undefined || change.tone !== undefined) scheduleSave(key);
   };
 
   const generate = async (key: string) => {
-    const compose = get(key);
+    let compose = get(key);
     if (!compose || compose.generating) return;
-    const request = generationRequest({ source: compose.source, angle: compose.angle, take: compose.take, toneKey: compose.tone });
+    // A typed topic that hasn't been searched yet is searched first; the best stories are then used.
+    if (!compose.source && compose.topic.trim() && !topicFor(compose)) {
+      if (!await searchTopic(key)) return;
+      compose = get(key);
+      if (!compose) return;
+    }
+    const topic = topicFor(compose);
+    const request = generationRequest({ source: compose.source, topic, angle: compose.angle, take: compose.take, toneKey: compose.tone, shape: compose.shape });
     if ("error" in request) { patch(key, { notice: request.error }); return; }
     const controller = new AbortController();
     generations.current.set(key, controller);
@@ -161,8 +266,16 @@ function useComposerActions(onConnectLinkedIn: () => void) {
       const data = await editorialRequest<ReviewResponse>(request.endpoint, request.body, { signal: controller.signal });
       const text = (data.posts?.linkedin as Record<string, unknown> | undefined)?.[compose.tone];
       if (typeof text !== "string" || !text.trim()) throw new Error("No LinkedIn post was returned. Try again.");
-      patch(key, current => ({ previousBody: current.body.trim() ? current.body : undefined, body: text, notice: "Draft written. Check every claim against the source before posting." }));
+      const label = writtenFromLabel((data as { evidence?: { warnings?: Array<{ code: string }> } }).evidence?.warnings);
+      const sources = topic ? (compose.brief?.stories ?? []).filter(story => topic.storyIds.includes(story.id)).map(story => story.source) : [];
+      patch(key, current => ({ previousBody: current.body.trim() ? current.body : undefined, body: text,
+        writtenFrom: topic || label ? { label, sources: [...new Set(sources)] } : undefined,
+        notice: label === "opinion" ? "Opinion post written from your view. It makes no factual claims." : "Draft written. Check every claim against the source before posting." }));
       scheduleSave(key);
+      if (topic) {
+        trackInbox("topic_written", { stories: topic.storyIds.length, opinion: !topic.storyIds.length, shape: compose.shape });
+        void queryClient.invalidateQueries({ queryKey: RECENT_TOPICS_KEY });
+      }
     } catch (error) {
       if (get(key)) patch(key, { notice: controller.signal.aborted ? "Stopped. Nothing was replaced." : message(error, "Couldn't write a draft. Try again.") });
     } finally {
@@ -298,7 +411,7 @@ function useComposerActions(onConnectLinkedIn: () => void) {
     toast({ title: "Draft discarded" });
   };
 
-  const opened = (from: "story" | "blank" | "draft" | "note") => { tour.current?.("create-opened"); trackInbox("compose_opened", { from }); };
+  const opened = (from: "story" | "blank" | "draft" | "note" | "topic") => { tour.current?.("create-opened"); trackInbox("compose_opened", { from }); };
   const onScreen = (compose: Compose) => {
     if (compose.minimized) return false;
     if (compose.mode === "float") return true;
@@ -321,6 +434,12 @@ function useComposerActions(onConnectLinkedIn: () => void) {
       const blank = ref.current.find(compose => compose.mode === "float" && !compose.source && !compose.body.trim() && !compose.take.trim());
       if (blank) { patch(blank.key, { minimized: false, focusToken: Date.now(), ...(angle ? { angle } : {}) }); return; }
       addWindow(create({ mode: "float", angle: angle ?? "", focusToken: Date.now() }));
+    },
+    openTopic: (topic, angle) => {
+      opened("topic");
+      const compose = create({ mode: "float", topic: topic.slice(0, TOPIC_LIMITS.maxChars), angle: angle?.slice(0, 200) ?? "", focusToken: Date.now() });
+      addWindow(compose);
+      void searchTopic(compose.key);
     },
     openDraft: draft => {
       if (pendingRef.current?.pending.compose.draft?.id === draft.id) {
@@ -349,6 +468,7 @@ function useComposerActions(onConnectLinkedIn: () => void) {
     },
   };
   return { value, composes, pending, undoSeconds, ready, update, generate, post, schedule, close, discard, patch, finishPending,
+    searchTopic, togglePick, chooseAngle, saveStory, topicSuggestions,
     touch: (key: string) => { lastActive.current = key; },
     setUndoSeconds: (seconds: number) => { storeUndoSeconds(seconds); setUndoSeconds(seconds); },
     stop: (key: string) => generations.current.get(key)?.abort() };
@@ -390,7 +510,16 @@ function ComposeCard({ compose }: Readonly<{ compose: Compose }>) {
   const over = compose.body.length > LINKEDIN_CHARACTER_LIMIT;
   const empty = !compose.body.trim();
   const tone = CREATE_TONES.find(item => item.key === compose.tone)!;
-  const title = compose.angle.trim() || compose.source?.headline || (compose.draft ? "LinkedIn draft" : "New LinkedIn post");
+  const title = compose.angle.trim() || compose.source?.headline || compose.topic.trim() || (compose.draft ? "LinkedIn draft" : "New LinkedIn post");
+  const topicMode = !compose.source && !(compose.draft && !compose.topic.trim());
+  const stories = compose.brief?.topic === compose.topic.trim() ? compose.brief.stories : undefined;
+  // Pausing while typing a topic looks up related stories (searches are rate limited, so only on change).
+  useEffect(() => {
+    const topic = compose.topic.trim();
+    if (!topicMode || compose.searching || compose.brief?.topic === topic || topic.length < TOPIC_LIMITS.minChars || !topicWords(topic).length) return;
+    const timer = setTimeout(() => void actions.searchTopic(compose.key), 1500);
+    return () => clearTimeout(timer);
+  }, [compose.topic, topicMode]);
   const tomorrow = useMemo(() => nextMorning(new Date()), [picking]);
   const weekday = useMemo(() => nextMorning(new Date(), true), [picking]);
   useEffect(() => {
@@ -429,10 +558,10 @@ function ComposeCard({ compose }: Readonly<{ compose: Compose }>) {
           <Linkedin className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           <span className="font-medium">{actions.ready ? "Your LinkedIn profile" : "LinkedIn not connected"}</span>
         </div>
-        <div className="flex min-h-9 items-center gap-2 border-b px-3 text-xs">
+        {topicMode ? <TopicPanel compose={compose} stories={stories} /> : <div className="flex min-h-9 items-center gap-2 border-b px-3 text-xs">
           <span className="w-16 shrink-0 text-muted-foreground">Based on</span>
           <span className="min-w-0 truncate rounded bg-muted px-2 py-0.5">{compose.source ? compose.source.headline : "Your own idea"}</span>
-        </div>
+        </div>}
         <label className="flex min-h-9 items-center gap-2 border-b px-3 text-xs">
           <span className="w-16 shrink-0 text-muted-foreground">Angle</span>
           <input value={compose.angle} onChange={event => actions.update(compose.key, { angle: event.target.value })} maxLength={200}
@@ -440,10 +569,24 @@ function ComposeCard({ compose }: Readonly<{ compose: Compose }>) {
         </label>
         <textarea ref={bodyRef} value={compose.body} onChange={event => actions.update(compose.key, { body: event.target.value })} aria-label="Post text"
           placeholder="Write your post, or use Help me write below." className={cn("min-h-0 w-full flex-1 resize-none bg-transparent px-3 py-2 text-sm leading-relaxed outline-none", !float && "min-h-[10rem]")} data-testid="compose-body" />
+        {compose.writtenFrom && compose.body.trim() && <p className="mx-3 mb-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground" data-testid="compose-written-from">
+          {compose.writtenFrom.label === "headlines" && <span className="rounded-full bg-amber-500/10 px-2 py-0.5 font-medium text-amber-800 dark:text-amber-300" title="The full articles couldn't be read; check the originals before posting.">Written from headlines</span>}
+          {compose.writtenFrom.label === "opinion" && <span className="rounded-full bg-muted px-2 py-0.5 font-medium text-foreground" title="No related stories were found; the post states your view and makes no factual claims.">Opinion, no sources</span>}
+          {compose.writtenFrom.sources.length > 0 && <span>Sources: {compose.writtenFrom.sources.join(", ")}</span>}
+        </p>}
         <div className="mx-3 mb-2 flex flex-wrap items-center gap-1.5 rounded-md border bg-muted/40 p-1.5">
           <Sparkles className="ml-1 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
           <input value={compose.take} onChange={event => actions.update(compose.key, { take: event.target.value })} maxLength={2000} aria-label="Your take"
-            placeholder={compose.source ? "Your take (optional)" : "Describe your idea"} className="h-8 min-w-[8rem] flex-1 rounded border bg-card px-2 text-xs outline-none focus:border-input" />
+            placeholder={compose.source ? "Your take (optional)" : !topicMode ? "Describe your idea" : stories && !stories.length ? "Your view on it (needed)" : "Your view (optional)"}
+            className="h-8 min-w-[8rem] flex-1 rounded border bg-card px-2 text-xs outline-none focus:border-input" />
+          {topicMode && stories && stories.length > 0 && <DropdownMenu>
+            <DropdownMenuTrigger asChild><Button variant="outline" size="sm" className="h-8 gap-1 text-xs" aria-label={`Post shape: ${TOPIC_SHAPE_LABELS[compose.shape]}`}>{TOPIC_SHAPE_LABELS[compose.shape]}<ChevronDown className="h-3 w-3" aria-hidden="true" /></Button></DropdownMenuTrigger>
+            <DropdownMenuContent align="end"><DropdownMenuLabel>Shape</DropdownMenuLabel>
+              <DropdownMenuRadioGroup value={compose.shape} onValueChange={value => actions.update(compose.key, { shape: value as TopicShape })}>
+                {TOPIC_SHAPES.map(shape => <DropdownMenuRadioItem key={shape} value={shape}>{TOPIC_SHAPE_LABELS[shape]}</DropdownMenuRadioItem>)}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>}
           <DropdownMenu>
             <DropdownMenuTrigger asChild><Button variant="outline" size="sm" className="h-8 gap-1 text-xs">{tone.label}<ChevronDown className="h-3 w-3" aria-hidden="true" /></Button></DropdownMenuTrigger>
             <DropdownMenuContent align="end"><DropdownMenuLabel>Tone</DropdownMenuLabel>
@@ -493,6 +636,64 @@ function ComposeCard({ compose }: Readonly<{ compose: Compose }>) {
       </>}
       <SchedulePicker open={picking} onOpenChange={setPicking} onSchedule={at => { setPicking(false); void actions.schedule(compose.key, at); }} />
     </section>
+  );
+}
+
+/** Topic-first writing: the topic, suggestions, and the related stories to write from. */
+function TopicPanel({ compose, stories }: Readonly<{ compose: Compose; stories?: TopicBriefResponse["stories"] }>) {
+  const actions = useContext(ActionsContext)!;
+  const [collapsed, setCollapsed] = useState(false);
+  const written = Boolean(compose.writtenFrom && compose.body.trim());
+  const picked = new Set(compose.picked);
+  const showStories = stories && !(written && collapsed);
+  return (
+    <div className="border-b px-3 pb-1.5 text-xs" data-testid="compose-topic">
+      <div className="flex min-h-9 items-center gap-2">
+        <span className="w-16 shrink-0 text-muted-foreground">Topic</span>
+        <input value={compose.topic} maxLength={TOPIC_LIMITS.maxChars} aria-label="Topic" placeholder="What do you want to post about?"
+          onChange={event => actions.update(compose.key, { topic: event.target.value })}
+          onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); void actions.searchTopic(compose.key); } }}
+          className="h-8 min-w-0 flex-1 bg-transparent text-sm outline-none" />
+        <Button type="button" size="sm" variant="ghost" className="h-8 px-2" aria-label="Find related stories" disabled={compose.searching || compose.topic.trim().length < TOPIC_LIMITS.minChars}
+          onClick={() => void actions.searchTopic(compose.key)}><Search className="h-3.5 w-3.5" aria-hidden="true" /></Button>
+      </div>
+      {!stories && !compose.searching && actions.topicSuggestions.length > 0 && <div className="flex flex-wrap gap-1 pb-1 pl-[4.5rem]" role="group" aria-label="Topic suggestions">
+        {actions.topicSuggestions.map(topic => <button key={topic} type="button" className="rounded-full border px-2 py-0.5 hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+          onClick={() => { actions.update(compose.key, { topic }); void actions.searchTopic(compose.key, topic); }}>{topic}</button>)}
+      </div>}
+      {compose.searching && <p role="status" className="pb-1 pl-[4.5rem] text-muted-foreground">Looking for related stories…</p>}
+      {compose.searchError && !compose.searching && <p role="alert" className="pb-1 pl-[4.5rem] text-destructive">{compose.searchError}</p>}
+      {stories && written && <button type="button" className="pb-1 pl-[4.5rem] text-primary underline-offset-2 hover:underline" onClick={() => setCollapsed(!collapsed)}>
+        {collapsed ? `Based on ${compose.picked.length || "no"} stor${compose.picked.length === 1 ? "y" : "ies"} · Change` : "Hide stories"}</button>}
+      {showStories && (stories.length === 0
+        ? <p role="status" className="pb-1 pl-[4.5rem] text-muted-foreground">No recent stories on this topic. Add your view below and Pundit writes an opinion post that makes no factual claims.</p>
+        : <section aria-label="Related stories" className="pl-[4.5rem]">
+          <p className="flex items-center justify-between pb-0.5 text-muted-foreground"><span>Related stories{compose.brief?.searchedFor ? ` for “${compose.brief.searchedFor}”` : ""}</span><span>{compose.picked.length} of {stories.length} ticked</span></p>
+          <ul className="max-h-40 space-y-1 overflow-y-auto pr-1">
+            {stories.map(story => {
+              const saved = compose.savedStories.includes(story.id);
+              return <li key={story.id} className="flex items-start gap-2 rounded px-1 py-0.5 hover:bg-muted/50">
+                <input type="checkbox" className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-primary" checked={picked.has(story.id)} aria-label={`Use story: ${story.title}`}
+                  onChange={() => actions.togglePick(compose.key, story.id)} />
+                <div className="min-w-0 flex-1">
+                  <a href={story.url} target="_blank" rel="noopener noreferrer" className="line-clamp-2 font-medium text-foreground hover:underline">{story.title}</a>
+                  <p className="text-[11px] text-muted-foreground">{storyMeta(story)}{story.fullText ? " · Full text" : ""}{story.origin === "discover" ? " · In your Discover" : ""}</p>
+                </div>
+                <button type="button" className="mt-0.5 shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-60" disabled={saved}
+                  aria-label={saved ? `Saved to Shortlist: ${story.title}` : `Save to Shortlist: ${story.title}`} title={saved ? "In your Shortlist" : "Save to Shortlist"}
+                  onClick={() => void actions.saveStory(compose.key, story.id)}>{saved ? <BookmarkCheck className="h-3.5 w-3.5" aria-hidden="true" /> : <Bookmark className="h-3.5 w-3.5" aria-hidden="true" />}</button>
+              </li>;
+            })}
+          </ul>
+          {(compose.anglesLoading || (compose.angles?.length ?? 0) > 0) && <div className="flex flex-wrap items-center gap-1 pt-1" role="group" aria-label="Angle ideas">
+            <span className="text-muted-foreground">Angles:</span>
+            {compose.anglesLoading && <span className="text-muted-foreground" role="status">thinking…</span>}
+            {compose.angles?.map(angle => <button key={angle.title} type="button" title={angle.why}
+              className={cn("rounded-full border px-2 py-0.5 text-left hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring", compose.angle === angle.title && "border-primary bg-primary/10")}
+              onClick={() => actions.chooseAngle(compose.key, angle)}>{angle.title}</button>)}
+          </div>}
+        </section>)}
+    </div>
   );
 }
 

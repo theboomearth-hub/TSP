@@ -8,6 +8,7 @@ import { requirePermission } from "../middlewares/requirePermission";
 import { instantReviewRateLimit } from "../middlewares/rateLimit";
 import { getEditorialJobs, EditorialQueueUnavailableError } from "../jobs/editorial";
 import { prepareEditorialRequest, executeEditorialRequest } from "../services/editorial-request";
+import { TopicBriefUnavailableError, topicBriefFailure } from "../services/topicBriefError";
 import { getAIErrorResponse } from "../services/openRouter";
 import { CrawlError, sourceFailureBody } from "../services/crawlerFetch";
 import { editorialCancellation } from "./editorial-context";
@@ -26,6 +27,7 @@ function admissionError(res: Response, error: unknown) {
   if (error instanceof EditorialQueueUnavailableError) return res.status(503).json({ code: "editorial_queue_unavailable", message: error.message });
   if (error instanceof Error && "status" in error && error.status === 403) return res.status(403).json({ message: "An attached media item is not available to this account" });
   if (error instanceof CrawlError) return res.status(422).json(sourceFailureBody(error));
+  if (error instanceof TopicBriefUnavailableError) { const failure = topicBriefFailure(error); return res.status(failure.status).json(failure.body); }
   const failure = generationAccessFailure(error) ?? getAIErrorResponse(error);
   if (failure.retryAfterSeconds) res.setHeader("Retry-After", String(failure.retryAfterSeconds));
   return res.status(failure.status).json(failure.body);

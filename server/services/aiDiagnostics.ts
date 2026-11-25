@@ -1,10 +1,11 @@
+import { EDITORIAL_TONES } from "@shared/editorial";
 const STAGES = ["provider_response_json", "provider_finish_reason", "provider_content_shape", "provider_empty_text", "writer_json", "writer_schema", "writer_validation", "writer_sentinel"] as const;
 export type AIDiagnosticStage = typeof STAGES[number];
 
 const VALIDATION_REASONS = ["json_parse", "schema", "empty_content", "insufficient_source", "format", "evidence", "attribution", "length", "url", "publication_missing", "source_url_missing", "unexpected_url", "placeholder_url", "multiple_urls", "hashtags", "quotation", "personal_experience"] as const;
 export type AIValidationReason = typeof VALIDATION_REASONS[number];
 
-const TONES = ["thoughtLeader", "industryInsider", "provocateur", "dataDriven", "professional", "custom"] as const;
+const TONES = [...EDITORIAL_TONES, "professional", "custom"] as const;
 export type AIDiagnosticTone = typeof TONES[number];
 
 const FINISH_REASONS = ["end_turn", "max_tokens", "tool_use", "pause_turn", "stop_sequence", "stop", "length", "tool_calls", "function_call", "STOP", "MAX_TOKENS", "OTHER", "MALFORMED_FUNCTION_CALL", "UNEXPECTED_TOOL_CALL"] as const;

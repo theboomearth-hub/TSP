@@ -193,7 +193,7 @@ export const INBOX_TOUR_STEPS: readonly AppTourStep[] = [
   ...APP_TOUR_STEPS.slice(0, FIRST_WORKSPACE_STEP + 1),
   {
     title: "Find a story in your Inbox",
-    description: "Open a story and choose Draft my take, or press Compose to write from your own idea. The guide advances when the composer opens.",
+    description: "Open a story and choose Draft my take, or press Compose and type any topic: Pundit finds related stories to write from. The guide advances when the composer opens.",
     path: "/dashboard",
     targets: ['[data-testid^="button-generate-"]', '[data-testid="button-refresh-inbox"]', '[data-testid="button-inbox-compose"]',
       '[data-testid="button-inbox-compose-mobile"]'],

@@ -1,3 +1,4 @@
+import { CREATE_TONES } from "@/components/dashboard/create-post-state";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { PageHeader } from "@/components/dashboard/page-header";
@@ -84,7 +85,7 @@ export default function PluginsPage({ embedded = false }: SettingsPageProps = {}
             <Card><CardHeader><CardTitle help="These preferences control draft destinations, not account connections. Existing drafts are unchanged.">Publishing defaults</CardTitle></CardHeader><CardContent className="space-y-4">
               <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,16em),1fr))] gap-4">
                 <Field id="default-platform" label="Default platform" render={(controlProps) => <NativeSelect {...controlProps} value={effectiveDefault} onChange={(event) => setDraft({ ...draft, defaultPlatform: event.target.value })}><option value="" disabled>Choose an enabled platform</option>{available.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</NativeSelect>} />
-                <Field id="default-tone" label="Default tone" render={(controlProps) => <NativeSelect {...controlProps} value={draft.defaultTone} onChange={(event) => setDraft({ ...draft, defaultTone: event.target.value })}>{["professional", "authoritative", "contrarian", "ai-recommended"].map((tone) => <option key={tone} value={tone}>{tone}</option>)}</NativeSelect>} />
+                <Field id="default-tone" label="Default tone" render={(controlProps) => <NativeSelect {...controlProps} value={draft.defaultTone} onChange={(event) => setDraft({ ...draft, defaultTone: event.target.value })}>{CREATE_TONES.map((tone) => <option key={tone.value} value={tone.value}>{tone.label}</option>)}</NativeSelect>} />
                 <Field id="publish-time" label="Preferred time" render={(controlProps) => <Input {...controlProps} required type="time" value={draft.preferredPublishTime} onChange={(event) => setDraft({ ...draft, preferredPublishTime: event.target.value })} />} />
                 <div className="min-w-0 space-y-2"><div className={fieldLabelRowClassName}><Label htmlFor="publish-timezone">Timezone</Label><InfoTooltip label="Timezone" descriptionId="timezone-help">Use an IANA timezone, such as UTC or Asia/Kolkata.</InfoTooltip></div><Input id="publish-timezone" required value={draft.timezone} aria-invalid={!timezoneValid} aria-describedby="timezone-help" onChange={(event) => setDraft({ ...draft, timezone: event.target.value })} /></div>
               </div>

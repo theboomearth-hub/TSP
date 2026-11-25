@@ -10,6 +10,8 @@ vi.mock("./urlFetcher", () => ({ fetchArticleFromUrl: fetcher }));
 vi.mock("./articlePool", () => ({ findPooledArticle: async () => null }));
 vi.mock("./keywordSearch", () => ({ isGoogleNewsArticleUrl: (url: string) => url.includes("news.google.com"), resolveGoogleNewsArticleUrl: async (url: string) => url }));
 vi.mock("./storyBrief", () => ({ storyBriefFor: brief }));
+vi.mock("./topicStories", () => ({ topicStoryArticles: vi.fn() }));
+vi.mock("../repositories/topicBriefs", () => ({ getTopicBrief: vi.fn(), markTopicBriefUsed: vi.fn(), findTopicStory: vi.fn() }));
 import { executeEditorialRequest } from "./editorial-request";
 import { CrawlError } from "./crawlerFetch";
 import { AIGenerationError } from "./openRouter";

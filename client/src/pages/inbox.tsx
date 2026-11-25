@@ -399,7 +399,7 @@ function StoryFolderView({ folder, tab, label }: Readonly<{ folder: StoryFolder;
               })}</ul>
             : <EmptyList
                 title={folder === "inbox" && !query && !label ? "You’re all caught up" : "Nothing here"}
-                body={folder === "inbox" && !query && !label ? "Find new stories from your sources, or write from your own idea." : query || label ? "Try another search or label." : FOLDER_TITLES[folder].note}
+                body={folder === "inbox" && !query && !label ? "Find new stories from your sources, or write about any topic: Compose finds related stories for you." : query || label ? "Try another search or label." : FOLDER_TITLES[folder].note}
                 actions={folder === "inbox" && !query && !label ? <>
                   <Button onClick={() => void refresh.startRefresh()} disabled={refreshing}>{refreshing ? "Finding stories…" : "Find new stories"}</Button>
                   <Button variant="outline" onClick={() => composer.openBlank()}>Write from your idea</Button>

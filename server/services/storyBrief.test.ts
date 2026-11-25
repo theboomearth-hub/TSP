@@ -5,6 +5,7 @@ const { inbox, profile, pooled, headlines } = vi.hoisted(() => ({ inbox: vi.fn()
 vi.mock("../storage", () => ({ storage: { getInboxItemByUrl: inbox, getUserProfile: profile } }));
 vi.mock("./articlePool", () => ({ findPooledArticle: pooled }));
 vi.mock("./keywordSearch", () => ({ fetchNewsHeadlines: headlines }));
+vi.mock("../repositories/topicBriefs", () => ({ findTopicStory: async () => undefined }));
 import { knownStory, relatedCoverage, sameDevelopment, storyBrief, storyBriefFor, type StorySignal } from "./storyBrief";
 import { buildEvidenceBrief } from "./editorialEvidence";
 

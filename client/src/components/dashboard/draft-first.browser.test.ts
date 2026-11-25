@@ -118,6 +118,12 @@ beforeEach(async () => {
         posts: { [platform]: { [tone]: content } }, details: { [platform]: { [tone]: detail(content) } },
         evidence, format: body.format, usage: { inputTokens: 1, outputTokens: 1 }, fallbackUsed: false });
     }
+    if (url.pathname === "/api/topics/related" && method === "POST") {
+      const topic = String(z.object({ topic: z.string() }).parse(request.postDataJSON()).topic);
+      return reply({ briefId: "5d2c4b7e-1f0a-4c6b-9a8e-2b3c4d5e6f70", topic, searchedFor: topic, expiresAt: "2026-11-26T12:00:00.000Z", stories: [
+        { id: "s1", title: "Retail media spend doubles", source: "Adweek", url: "https://adweek.test/retail", snippet: "", publishedAt: null, alsoCoveredBy: [{ source: "Digiday", url: "https://digiday.test/r" }], fullText: false, origin: "news" },
+      ] });
+    }
     if (url.pathname === "/api/drafts" && method === "POST") return failDraftSave
       ? reply({ message: "Platform save unavailable" }, 503)
       : reply({ ...z.record(z.unknown()).parse(request.postDataJSON()), id: "saved-platform", updatedAt: "2026-10-07T12:00:00.000Z" });
@@ -389,6 +395,19 @@ describe("document editor and integrated agent chat", { timeout: 15_000 }, () =>
     await chat().fill("Compare these reports"); await chat().press("Enter");
     await check(editor()).toHaveText(mainText);
     expect(generationCalls[0]).toMatchObject({ sourceUrls: ["https://news.test/pilot", "https://news.test/other"], instruction: "Compare these reports", selectedPlatforms: [] });
+  });
+  it("attaches news found for a topic, not only stories already in Discover", async () => {
+    await open(); await command("sources");
+    const topicSearch = page.getByRole("region", { name: "News on a topic" });
+    await topicSearch.getByRole("textbox", { name: "Topic to search" }).fill("retail media");
+    await topicSearch.getByRole("button", { name: "Find stories", exact: true }).click();
+    await check(topicSearch).toContainText("Adweek · +1 outlet");
+    await topicSearch.getByRole("checkbox", { name: /Retail media spend doubles/ }).check();
+    await page.getByRole("checkbox", { name: /Pilot report/ }).check();
+    await page.getByRole("button", { name: "Use selected articles", exact: true }).click();
+    await chat().fill("Compare these"); await chat().press("Enter");
+    await check(editor()).toHaveText(mainText);
+    expect(generationCalls[0]).toMatchObject({ sourceUrls: ["https://adweek.test/retail", "https://news.test/pilot"], instruction: "Compare these" });
   });
   it("saves attached references and unsent chat across reloads", async () => {
     await open(); await command("sources"); await page.getByRole("checkbox", { name: /Pilot report/ }).check();

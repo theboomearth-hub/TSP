@@ -1,13 +1,10 @@
+import { TONE_CATALOG } from "@shared/editorial";
 import type { ReviewResponse } from "@/lib/editorial";
 import type { ArticleMedia } from "./rich-article-editor";
 import type { DraftEditingState } from "@shared/draft-revision";
 
-export const CREATE_TONES = [
-  { key: "thoughtLeader", value: "professional", label: "Thought Leader" },
-  { key: "industryInsider", value: "authoritative", label: "Industry Insider" },
-  { key: "provocateur", value: "contrarian", label: "Provocateur" },
-  { key: "dataDriven", value: "ai-recommended", label: "Data-Driven" },
-] as const;
+/** Every writing tone, with its stored name and label (shared with the server's checks). */
+export const CREATE_TONES = TONE_CATALOG;
 export type CreateTone = typeof CREATE_TONES[number]["key"];
 export interface ManualArticle { title: string; content: string; media: ArticleMedia[] }
 export const emptyArticle = (): ManualArticle => ({ title: "", content: "", media: [] });

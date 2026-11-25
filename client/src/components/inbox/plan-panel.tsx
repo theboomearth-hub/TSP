@@ -23,7 +23,7 @@ export function PlanPanel() {
         : <p className="text-xs text-muted-foreground">Nothing planned this week. Set your posting days in <Link href="/dashboard?folder=ideas&view=strategy" className="font-semibold text-primary hover:underline">Strategy</Link>.</p>}
       <p className="text-[11px] text-muted-foreground">Suggestions only. Nothing posts automatically.</p>
     </section>
-    <UpcomingMoments days={30} limit={3} onDraft={angle => composer.openBlank(angle)} />
+    <UpcomingMoments days={30} limit={3} onDraft={(angle, title) => composer.openTopic(title, angle)} />
     <Button asChild variant="outline" className="w-full"><Link href="/dashboard/calendar">Open Calendar</Link></Button>
   </>;
 }

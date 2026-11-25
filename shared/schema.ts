@@ -1240,6 +1240,27 @@ export const savedSearches = pgTable("saved_searches", {
 export type SavedSearch = typeof savedSearches.$inferSelect;
 // ── Phase 3A (end) ──
 
+// ── Topic-first writing: related stories kept for 24 hours (begin) ──
+import type { TopicAngle, TopicStory } from "./topic-stories";
+export const topicBriefs = pgTable("topic_briefs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  topic: text("topic").notNull(),
+  searchedFor: text("searched_for").notNull().default(""),
+  stories: jsonb("stories").$type<TopicStory[]>().notNull().default([]),
+  angles: jsonb("angles").$type<TopicAngle[] | null>(),
+  /** Story ids the person wrote from, newest write wins. */
+  picked: jsonb("picked").$type<string[]>().notNull().default([]),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull().default(sql`now() + interval '24 hours'`),
+}, table => [
+  check("topic_briefs_topic_length", sql`char_length(btrim(${table.topic})) between 1 and 200`),
+]);
+export type TopicBrief = typeof topicBriefs.$inferSelect;
+// ── Topic-first writing (end) ──
+
 // ── Phase 3 — topic discovery: strategy, ideas, check-ins (begin) ──
 import { date as pgDate } from "drizzle-orm/pg-core";
 import type { CheckinAnswers, ContentStrategy, IdeaState, TopicIdea } from "./topic-ideas";

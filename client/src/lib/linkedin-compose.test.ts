@@ -27,4 +27,26 @@ describe("LinkedIn composer helpers", () => {
     const manual = generationRequest({ angle: "Measurement myths", take: "Most dashboards compare different definitions.", toneKey: "dataDriven" });
     expect(manual).toMatchObject({ endpoint: "/api/instant-review/manual", body: { title: "Measurement myths", selectedPlatforms: ["linkedin"], tones: ["dataDriven"] } });
   });
+
+  const topic = { topic: "programmatic DOOH", briefId: "5d2c4b7e-1f0a-4c6b-9a8e-2b3c4d5e6f70", storyIds: ["s1", "s3"], storiesFound: 4 };
+  it("writes a topic post from the ticked stories, with the chosen shape", () => {
+    expect(generationRequest({ topic, angle: "Measurement is the blocker", take: "", toneKey: "thoughtLeader", shape: "roundup" })).toEqual({
+      endpoint: "/api/instant-review/manual",
+      body: { selectedPlatforms: ["linkedin"], tones: ["thoughtLeader"], format: "short-post", userContext: "Angle: Measurement is the blocker", title: "programmatic DOOH", content: "",
+        topicBrief: { id: topic.briefId, storyIds: ["s1", "s3"] }, shape: "roundup" },
+    });
+    expect(generationRequest({ topic, angle: "", take: "", toneKey: "thoughtLeader", shape: "post" })).not.toHaveProperty("body.shape");
+  });
+
+  it("writes an opinion post from the person's view when no story is used, and asks for the view otherwise", () => {
+    const none = { ...topic, storyIds: [], storiesFound: 0 };
+    expect(generationRequest({ topic: none, angle: "", take: "", toneKey: "thoughtLeader" })).toEqual({
+      error: "Pundit found no stories on this topic. Add your view in a sentence or two to write an opinion post." });
+    expect(generationRequest({ topic: { ...none, storiesFound: 4 }, angle: "", take: "", toneKey: "thoughtLeader" })).toEqual({
+      error: "Tick at least one story, or add your view to write an opinion post." });
+    expect(generationRequest({ topic: none, angle: "", take: "Buyers won't scale it without shared measurement.", toneKey: "thoughtLeader" })).toMatchObject({
+      endpoint: "/api/instant-review/manual",
+      body: { title: "programmatic DOOH", content: "programmatic DOOH\n\nBuyers won't scale it without shared measurement.", opinionOnly: true, sourceLabel: "Your view" },
+    });
+  });
 });

@@ -28,7 +28,8 @@ export function useIdeaActions() {
     draft(idea: ActionableIdea) {
       const story = idea.sourceStory;
       if (story) composer.openForStory({ id: story.inboxItemId, headline: story.headline, source: story.source, articleUrl: story.url }, false);
-      else composer.openBlank(idea.angle);
+      // Without a story, the idea's topic finds related stories and its angle sets the point.
+      else composer.openTopic(idea.pillar?.trim() || idea.title, idea.angle);
       trackInbox("idea_drafted", { kind: idea.kind, saved: idea.state === "saved" });
       if (idea.state !== "used") void change(idea, "used");
     },

@@ -9,7 +9,7 @@ import { localDate, momentsQuery, shortDate, whenLabel } from "@/lib/moments-que
  * Renders nothing while loading, on error or when there are none. `onDraft` receives a suggested angle
  * so callers can open the composer.
  */
-export function UpcomingMoments({ days = 60, limit = 5, onDraft }: Readonly<{ days?: number; limit?: number; onDraft?: (angle: string) => void }>) {
+export function UpcomingMoments({ days = 60, limit = 5, onDraft }: Readonly<{ days?: number; limit?: number; onDraft?: (angle: string, title: string) => void }>) {
   const today = localDate();
   const { data } = useQuery(momentsQuery(days, today));
   const moments = (data ?? []).slice(0, Math.max(0, limit));
@@ -27,7 +27,7 @@ export function UpcomingMoments({ days = 60, limit = 5, onDraft }: Readonly<{ da
             <p className="mt-0.5 text-sm font-medium [overflow-wrap:anywhere]">{moment.title}</p>
             {moment.inLeadWindow && <Badge variant="info" className="mt-1">Good time to post</Badge>}
             {(onDraft || moment.url) && <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-              {onDraft && <Button type="button" size="sm" variant="outline" onClick={() => onDraft(moment.suggestedAngle)} data-testid={`button-draft-moment-${moment.id}`}>
+              {onDraft && <Button type="button" size="sm" variant="outline" onClick={() => onDraft(moment.suggestedAngle, moment.title)} data-testid={`button-draft-moment-${moment.id}`}>
                 Draft a post<span className="sr-only"> about {moment.title}</span>
               </Button>}
               {moment.url && <a href={moment.url} target="_blank" rel="noopener noreferrer"

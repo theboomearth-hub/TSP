@@ -6,6 +6,7 @@ import { authedOf, requireDbUser } from "../middlewares/requireDbUser";
 import { requirePermission } from "../middlewares/requirePermission";
 import { generateInstantReviewDetailed } from "../services/punditBrain";
 import { prepareEditorialRequest, executeEditorialRequest } from "../services/editorial-request";
+import { TopicBriefUnavailableError, topicBriefFailure } from "../services/topicBriefError";
 import { fetchArticleFromUrl } from "../services/urlFetcher";
 import { storage, ScheduleConflictError, type TenantScope } from "../storage";
 import { getAIErrorResponse } from "../services/openRouter";
@@ -16,6 +17,7 @@ import { reconciliationSchema } from "@shared/publishing-reconciliation";
 import { enqueuePublishDraft, QueueUnavailableError } from "../jobs/queue";
 import { handlePublishDraft, type PublishDraftJobData } from "../jobs/handlers/publish-draft";
 import { z } from "zod";
+import { TONE_VALUES } from "@shared/editorial";
 import { CrawlError, sourceFailureBody } from "../services/crawlerFetch";
 import { editorialCancellation, editorialContext, editorialPreferences, reviewUrl, validateEditorialFormat } from "./editorial-context";
 import { generationAccessFailure } from "../services/generation-quota";
@@ -27,7 +29,7 @@ import { findSelfRepetitionMatches } from "@shared/selfRepetition";
 const createDraftSchema = z.object({
   inboxItemId: z.string().optional(),
   platform: z.enum(ALL_PLATFORM_KEYS),
-  tone: z.enum(["professional", "authoritative", "contrarian", "ai-recommended"]),
+  tone: z.enum(TONE_VALUES),
   content: z.string().trim().min(1).max(5000),
   media: z.array(z.object({ id: z.string().uuid(), type: z.enum(["image", "video", "audio"]), name: z.string().max(255), url: z.string().max(2_000) })).max(8).default([]),
 });
@@ -84,6 +86,7 @@ function generationError(res: Response, error: unknown) {
   }
   if (error instanceof Error && "status" in error && error.status === 403) return res.status(403).json({ message: "An attached media item is not available to this account" });
   if (error instanceof CrawlError) return res.status(422).json(sourceFailureBody(error));
+  if (error instanceof TopicBriefUnavailableError) { const failure = topicBriefFailure(error); return res.status(failure.status).json(failure.body); }
   const failure = getAIErrorResponse(error);
   if (failure.retryAfterSeconds !== undefined) res.setHeader("Retry-After", String(failure.retryAfterSeconds));
   return res.status(failure.status).json(failure.body);

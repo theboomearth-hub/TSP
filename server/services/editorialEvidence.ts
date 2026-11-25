@@ -4,11 +4,15 @@ export const MAX_SOURCE_CHARACTERS = 24_000;
 const MAX_PASSAGE_CHARACTERS = 1200;
 export const MAX_SOURCE_PASSAGES = 128;
 
-export type SourceWarningCode = "source_truncated" | "metadata_only" | "headlines_only" | "limited_source_content" | "extraction_unknown" | "passage_limit";
+export type SourceWarningCode = "source_truncated" | "metadata_only" | "headlines_only" | "opinion_only" | "limited_source_content" | "extraction_unknown" | "passage_limit";
 export interface SourceWarning { code: SourceWarningCode; message: string }
 export interface SourceContentMetadata {
   /** "headlines": the page could not be read, so the content is the story's headline, snippet and other outlets' headlines. */
   extractionMethod: "article" | "main" | "paragraph_cluster" | "metadata" | "manual" | "index" | "headlines";
+  /** Several stories picked for a topic, not one article. */
+  topic?: boolean;
+  /** No sources: the content is the author's own view of a topic. */
+  opinion?: boolean;
   originalLength: number;
   retainedLength: number;
   truncated: boolean;
@@ -71,8 +75,12 @@ function sourceWarnings(input: EvidenceInput, retained: string, excerpts: Source
   if (headlines) {
     warnings.push({ code: "headlines_only", message: "Written from headlines: the full article couldn't be read, so this draft uses the story's headline, snippet and other outlets' headlines. Check the original before publishing." });
   }
-  // A headline brief is short by design; the warning above already says so.
-  if (!headlines && retained.trim().length < 200) {
+  const opinion = input.contentMetadata?.opinion === true;
+  if (opinion) {
+    warnings.push({ code: "opinion_only", message: "Opinion, no sources: Pundit found no related stories, so this post states your view and makes no factual claims." });
+  }
+  // A headline brief and an opinion are short by design; the warnings above already say so.
+  if (!headlines && !opinion && retained.trim().length < 200) {
     warnings.push({ code: "limited_source_content", message: "Very little source text is available. This is a length warning, not an assessment of factual quality." });
   }
   if (!input.contentMetadata) {
