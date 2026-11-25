@@ -290,7 +290,7 @@ describe("full App integration security (real router, Settings and Create provid
     expect(new URL(page.url()).pathname).toBe("/dashboard");
   });
 
-  it("can skip a first-run tour before checking legacy workspace routes", async () => {
+  it("keeps the tour closed on a device with no tour progress, then checks legacy workspace routes", async () => {
     await open("/dashboard");
     await page.evaluate(() => {
       const security = (window as Window & { security?: { setSession: (id: string | null) => void } }).security;
@@ -304,10 +304,11 @@ describe("full App integration security (real router, Settings and Create provid
       if (!security) throw new Error("Fixture session controls are unavailable");
       security.setSession("a");
     });
-    await browserExpect(page).toHaveURL(`${origin}/dashboard/settings?tab=integrations`);
-    await page.getByRole("button", { name: "Skip tour" }).click();
+    // Setup was done elsewhere and nothing is saved here: the guide stays closed and the page stays on Home.
+    await browserExpect(page.getByTestId("route-page")).toHaveText("@/pages/overview");
+    await page.waitForTimeout(300);
     await browserExpect(page.getByTestId("dialog-app-tour")).toHaveCount(0);
-    expect(await page.evaluate(() => JSON.parse(localStorage.getItem("tsp-app-tour:v3:a:tenant-a") ?? "{}").dismissed)).toBe(true);
+    await browserExpect(page).toHaveURL(`${origin}/dashboard`);
 
     for (const route of ["/dashboard/performance", "/dashboard/analytics"]) {
       await page.goto(origin + route);
