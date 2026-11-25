@@ -187,7 +187,7 @@ export function QuickSetup({ firstName, userIndustry, userCountry, completed, on
             A sentence or two is enough. I'll find the sources, topics and people worth following in today's news.
           </p>
         </div>
-        <form onSubmit={submit} className="space-y-3">
+        <form onSubmit={submit} data-app-tour="setup-ask" className="space-y-3">
           <Textarea ref={input} aria-label="Message Pundit" aria-describedby="quick-setup-hint" value={draft} maxLength={MAX_FOCUS} rows={3} autoFocus
             placeholder="e.g. I lead growth at a B2B fintech in India, writing for CFOs and founders."
             onChange={event => setDraft(event.target.value)} onKeyDown={onKeyDown} className="resize-none text-base md:text-base" />

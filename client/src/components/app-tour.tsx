@@ -19,7 +19,9 @@ export const APP_TOUR_STEPS = [
     title: "Start by talking to Pundit",
     description: "Tell Pundit what you do and who you want to reach, then send it. You can keep using the app while this guide is open, or select Next to keep exploring.",
     path: "/onboarding",
-    targets: ['[aria-label="Message Pundit"]'],
+    // The whole one-click form, so the guide opens below its examples and Set me up, not over them.
+    // The step-by-step workspace has no such form and falls back to its message box.
+    targets: ['[data-app-tour="setup-ask"]', '[aria-label="Message Pundit"]'],
   },
   {
     title: "Check what Pundit understood",

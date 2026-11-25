@@ -17,6 +17,7 @@ let origin: string;
 let errors: string[];
 type Body = Record<string, unknown>;
 type Reply = { status?: number; data?: unknown; raw?: string };
+type Box = { x: number; y: number; width: number; height: number };
 type Path = "understand" | "agent" | "suggestions" | "quick-setup";
 let handlers: Record<Path, (body: Body) => Reply>;
 let calls: Array<{ path: Path; body: Body }>;
@@ -477,6 +478,22 @@ describe("one-click setup", () => {
     await browserExpect(message()).toBeFocused();
     expect(sent("quick-setup")).toEqual([]);
     await browserExpect(setMeUp()).toBeEnabled();
+  });
+
+  it("opens the tour's first step clear of the message box, the examples and Set me up", async () => {
+    await page.goto(`${origin}/onboarding?tour=1`);
+    const tour = page.getByTestId("dialog-app-tour");
+    await browserExpect(tour).toContainText("Start by talking to Pundit");
+    const controls = [message(), ...["Founder, B2B SaaS", "Fintech marketing", "Healthcare consultant", "Climate investor"]
+      .map(name => page.getByRole("button", { name, exact: true })), setMeUp()];
+    const overlaps = (a: Box, b: Box) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+    await browserExpect.poll(async () => {
+      const guide = await tour.boundingBox();
+      // Radix keeps the popover off screen until it has been placed.
+      if (!guide || guide.y < 0) return "not placed yet";
+      const boxes = await Promise.all(controls.map(control => control.boundingBox()));
+      return boxes.some(box => !box || overlaps(guide, box)) ? "covers a control" : "clear";
+    }, { timeout: 3000 }).toBe("clear");
   });
 
   it("asks one question only when the description is vague, then builds from the answer or a skip", async () => {
