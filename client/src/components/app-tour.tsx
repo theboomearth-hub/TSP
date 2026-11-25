@@ -377,6 +377,11 @@ function loadProgress(config: TourVariantConfig, scope: string): TourProgress | 
   return adopted;
 }
 
+/** Whether this browser has tour progress for this user and workspace, in any layout. */
+function hasProgressHere(scope: string) {
+  return Object.values(TOUR_VARIANTS).some(variant => readProgress(variant, scope) !== null);
+}
+
 /** Dismissing or finishing the tour in one layout must not let the other layout reopen it. */
 function shareDismissal(current: TourVariantConfig, scope: string, completed: boolean) {
   for (const other of Object.values(TOUR_VARIANTS)) {
@@ -452,7 +457,10 @@ function VariantTourProvider({ children, scope, enabled, phase = "workspace", va
     progressRef.current = { ...saved, step: nextIndex, ready: saved?.step === nextIndex && saved.ready === true,
       dismissed: saved?.dismissed ?? false, completed: saved?.completed ?? false };
     const awaitingSetup = phase === "setup" && saved && saved.step >= FIRST_WORKSPACE_STEP;
-    const shouldStart = !awaitingSetup && (!saved || (!saved.dismissed && !saved.completed));
+    // Setup is done before the workspace mounts. With no tour progress in this browser at all (another device,
+    // or cleared storage), nobody is following the guide here: it waits for App tour instead of taking over the page.
+    const newHere = phase === "workspace" && !saved && !hasProgressHere(scope);
+    const shouldStart = !awaitingSetup && !newHere && (!saved || (!saved.dismissed && !saved.completed));
     setIsOpen(shouldStart);
     openRef.current = shouldStart;
     if (shouldStart && phase === "workspace") setLocation(config.path(nextIndex, saved?.draftId, saved?.outcome));

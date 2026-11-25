@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { ADMIN_EMAILS } from "../shared/admin-access";
 import { ADMIN_TENANT_PAGE_SIZE, type AdminMonitoring, type TenantDirectory } from "../shared/admin";
-import { skipFirstWorkspaceTour } from "./app-tour";
+import { expectNoTourOnNewDevice, openTourFromHelp, skipFirstWorkspaceTour } from "./app-tour";
 
 const publicRoutes = [
   "/", "/pricing", "/how-it-works", "/blog",
@@ -236,6 +236,9 @@ test.describe("workspace consistency", () => {
 
     try {
       await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+      // Setup was done before this browser opened, so the guide waits for App tour. It opens on Integrations,
+      // whose summary request (already sent by the classic Home page) is held.
+      await openTourFromHelp(page);
       await summaryRequested;
       await expect(page.getByTestId("app-tour-arrow")).toBeVisible();
       await expect(page.getByTestId("button-connect-linkedin")).toHaveCount(0);
@@ -270,7 +273,7 @@ test.describe("workspace consistency", () => {
   for (const route of workspaceRoutes) {
     test(`${route.path} is responsive and visually consistent`, async ({ page }) => {
       await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
-      await skipFirstWorkspaceTour(page);
+      await expectNoTourOnNewDevice(page);
       for (const viewport of workspaceViewports) {
         await page.setViewportSize(viewport);
         await expectConsistentSurface(page, route.path, true, route);
