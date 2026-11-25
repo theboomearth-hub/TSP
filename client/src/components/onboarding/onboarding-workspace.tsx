@@ -7,7 +7,7 @@ import { fieldControlClassName } from "@/components/ui/field";
 import { cn } from "@/lib/utils";
 import type { OnboardingData } from "@/lib/onboarding-choices";
 import { browserSearchEdition, type SuggestionKind, type SuggestionStep, type PreviewHeadline } from "@/lib/onboarding-suggestions";
-import { STORY_LINK_KEY } from "@/lib/create-story-link";
+import { saveStoryForCreate, STORY_LINK_KEY } from "@/lib/create-story-link";
 import { useFocusUnderstanding } from "@/hooks/use-focus-understanding";
 import { useOnboardingAgent } from "@/hooks/use-onboarding-agent";
 import { useSetupSelections } from "@/hooks/use-setup-selections";
@@ -172,9 +172,12 @@ export function OnboardingWorkspace({ onComplete, isPending = false, userIndustr
     understanding.understand(next);
   };
 
-  const writePost = (headline?: PreviewHeadline) => {
-    if (headline?.link) navigate("/dashboard/create", { state: { [STORY_LINK_KEY]: headline.link } });
-    else navigate("/dashboard/create");
+  const opening = useRef(false);
+  const writePost = async (headline?: PreviewHeadline) => {
+    if (opening.current) return;
+    opening.current = true;
+    const link = headline?.link ? await saveStoryForCreate({ ...headline, link: headline.link }) : undefined;
+    navigate("/dashboard/create", link ? { state: { [STORY_LINK_KEY]: link } } : undefined);
   };
 
   // Discover searches for topics, companies and people, so a setup needs at least one of them.

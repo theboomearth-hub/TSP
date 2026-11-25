@@ -101,14 +101,17 @@ function googleNewsLink(value?: string): string | null {
   } catch { return null; }
 }
 
-/** Recent headlines with their publication, for onboarding suggestions. Article links are not resolved. */
-export async function fetchNewsHeadlines(query: string, searchEdition = "en-US", signal?: AbortSignal): Promise<NewsHeadline[]> {
+/**
+ * Headlines with their publication, for onboarding suggestions and related coverage. Article links are
+ * not resolved. `withinDays` limits results to recent stories (null: any age, for an older story's coverage).
+ */
+export async function fetchNewsHeadlines(query: string, searchEdition = "en-US", signal?: AbortSignal, withinDays: number | null = 30): Promise<NewsHeadline[]> {
   if (typeof query !== "string" || query.length > SEARCH_QUERY_LIMITS.term) return [];
   const trimmed = query.trim();
   if (!trimmed) return [];
   const { hl, gl, ceid } = getSearchEdition(searchEdition);
   const url = new URL("https://news.google.com/rss/search");
-  url.search = new URLSearchParams({ q: `${trimmed} when:30d`, hl, gl, ceid }).toString();
+  url.search = new URLSearchParams({ q: withinDays ? `${trimmed} when:${withinDays}d` : trimmed, hl, gl, ceid }).toString();
   const response = await fetchPublicText(url.href, { signal, timeoutMs: 6000 });
   const feed = await parser.parseString(response.text);
   return (feed.items || []).slice(0, 30).flatMap(item => {
@@ -161,10 +164,10 @@ export async function fetchArticlesForQuery(
         categories: [trimmed],
       };
     });
-    // A story whose Google News link could not be resolved cannot be read or written about,
-    // so it is left out; a later refresh can find and resolve it again.
+    // A story whose Google News link could not be resolved keeps that link: it opens the story in a
+    // browser, Pundit writes about it from its headline and snippet, and later refreshes try again.
     return resolved.flatMap(result => result.status === "fulfilled" ? [result.value] : [])
-      .filter(article => article.link && !isGoogleNewsArticleUrl(article.link));
+      .filter(article => article.link);
   } catch {
     console.error("[keywordSearch] Search request failed or was cancelled.");
     throw new CrawlError("search", "Article search failed or was cancelled. Please try again.");

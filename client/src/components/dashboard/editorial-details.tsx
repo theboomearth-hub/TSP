@@ -29,13 +29,14 @@ export function EditorialProgress({ pending, elapsed, error, cancel, progress, b
 export function SourceReview({ article, format, headingLevel = 3 }: Readonly<{ article: ReviewResponse["article"]; format?: EditorialFormat; headingLevel?: 3 | 4 }>) {
   const originalUrl = publicSourceUrl(article.url);
   const Heading = headingLevel === 4 ? "h4" : "h3";
+  const fromHeadlines = article.contentMetadata?.extractionMethod === "headlines";
   return <section aria-label="Source context" className="min-w-0 space-y-2 rounded-[6px] border border-border bg-card p-3 text-sm">
     <Heading className="break-words font-semibold">Source: {article.title}</Heading>
     <p className="text-muted-foreground">{article.source}{format && ` · Generated format: ${format}`}</p>
     {article.references?.length ? <ul>{article.references.map(reference => <li key={reference.url}>
       {publicSourceUrl(reference.url) && <a href={reference.url} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center text-primary underline">{reference.source}: {reference.title}</a>}
     </li>)}</ul> : originalUrl && <a href={originalUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center text-primary underline">Open original</a>}
-    <p className="font-medium">{article.references?.length ? "Selected article excerpts" : article.domain === "manual" ? "Your supplied article content" : "Fetched article content"}</p>
+    <p className="font-medium">{fromHeadlines ? "Headlines and snippets (the full article couldn't be read)" : article.references?.length ? "Selected article excerpts" : article.domain === "manual" ? "Your supplied article content" : "Fetched article content"}</p>
     <section aria-label="Source text" className="max-h-64 overflow-auto whitespace-pre-wrap break-words focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" tabIndex={0} data-testid="text-source-content">{article.content}</section>
     {!!article.media?.length && <p>{article.media.length} attachment(s) included. Media is not inspected as evidence; attach files manually when opening an external platform.</p>}
   </section>;

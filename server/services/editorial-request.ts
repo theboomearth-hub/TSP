@@ -13,6 +13,8 @@ import { CrawlError } from "./crawlerFetch";
 import { isGoogleNewsArticleUrl, resolveGoogleNewsArticleUrl } from "./keywordSearch";
 import { MAX_CREATION_REFERENCES } from "@shared/creation-session";
 import { buildEvidenceBrief, MAX_SOURCE_CHARACTERS, MAX_SOURCE_PASSAGES } from "./editorialEvidence";
+import { storyBriefFor, type StoryReference } from "./storyBrief";
+import type { TenantScope } from "../storage";
 
 // One link, so it can wait longer than the per-result budget during Discover refreshes.
 const GOOGLE_NEWS_RESOLVE_TIMEOUT_MS = 5000;
@@ -26,8 +28,30 @@ async function publisherUrl(url: string, signal: AbortSignal): Promise<string> {
   return resolved;
 }
 
-/** Most Discover stories are already in the shared index with their page read; otherwise read the publisher live. */
-async function readArticle(url: string, signal: AbortSignal): Promise<FetchedArticle> {
+type ReadArticle = FetchedArticle & { references?: StoryReference[] };
+
+/**
+ * Most Discover stories are already in the shared index with their page read; otherwise read the
+ * publisher live. A page that can't be read (paywall, block, a Google News link that won't resolve)
+ * is written from the story's headline, snippet and other outlets' headlines when Discover knows
+ * the story; only a link nothing is known about fails.
+ */
+async function readArticle(url: string, signal: AbortSignal, scope?: TenantScope): Promise<ReadArticle> {
+  try {
+    return await readPage(url, signal);
+  } catch (error) {
+    signal.throwIfAborted();
+    if (!(error instanceof CrawlError) || !scope) throw error;
+    const brief = await storyBriefFor(scope, url, signal);
+    if (brief) {
+      console.log(`[story-brief] writing from headlines (${error.code})`);
+      return brief;
+    }
+    throw error;
+  }
+}
+
+async function readPage(url: string, signal: AbortSignal): Promise<FetchedArticle> {
   try {
     const target = await publisherUrl(url, signal);
     const indexed = await findPooledArticle(target).catch(() => null);
@@ -130,10 +154,10 @@ async function readSelectedArticles(urls: string[], prepared: PreparedEditorialR
       throw new AIGenerationError("ai_invalid_input");
     }
     signal.throwIfAborted();
-    return readArticle(url, signal);
+    return readArticle(url, signal, scope);
   }));
   signal.throwIfAborted();
-  const articles: FetchedArticle[] = [];
+  const articles: ReadArticle[] = [];
   const failures: CrawlError["sources"] = [];
   for (const [index, result] of results.entries()) {
     if (result.status === "fulfilled") articles.push(result.value);
@@ -158,10 +182,14 @@ async function readSelectedArticles(urls: string[], prepared: PreparedEditorialR
   }).join("\n\n");
   const originalLength = articles.reduce((total, article, index) => total + headers[index].length +
     Math.max(article.content.length, article.contentMetadata?.originalLength ?? 0), (articles.length - 1) * 2);
-  return { ...articles[0], content,
-    references: articles.map(({ title, source, url }) => ({ title, source, url })),
+  const method = (name: string) => articles.some(article => article.contentMetadata?.extractionMethod === name);
+  // Each selected story, then the other outlets a headline brief drew on; one entry per link.
+  const references = [...new Map(articles.flatMap(article => article.references ?? [{ title: article.title, source: article.source, url: article.url }])
+    .map(reference => [reference.url, reference])).values()];
+  return { ...articles[0], content, references,
     contentMetadata: {
-      extractionMethod: articles.some(article => article.contentMetadata?.extractionMethod === "metadata") ? "metadata" as const : "article" as const,
+      // Headlines first: it is the label the person most needs to see before publishing.
+      extractionMethod: method("headlines") ? "headlines" as const : method("metadata") ? "metadata" as const : "article" as const,
       originalLength, retainedLength: content.length, truncated: originalLength > content.length,
     },
   };
@@ -175,7 +203,7 @@ export async function executeEditorialRequest(prepared: PreparedEditorialRequest
   const deadlineAt = Math.min(timeoutMs === undefined ? Infinity : Date.now() + timeoutMs, budget.data.deadlineAt ?? Infinity);
   if (deadlineAt <= Date.now()) throw new AIGenerationError("ai_timeout");
   const { input, options } = prepared;
-  const article = "url" in input ? await readArticle(input.url, signal) : input.sourceUrls
+  const article = "url" in input ? await readArticle(input.url, signal, options.voiceScope) : input.sourceUrls
     ? { ...await readSelectedArticles(input.sourceUrls, prepared, signal), title: input.title } : {
     title: input.title, content: input.content, source: input.sourceLabel ?? "Your draft", url: input.sourceUrl ?? "",
     contentMetadata: { extractionMethod: "manual" as const, originalLength: input.content.length, retainedLength: input.content.length, truncated: false },

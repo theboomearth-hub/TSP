@@ -22,6 +22,9 @@ let handlers: Record<Path, (body: Body) => Reply>;
 let calls: Array<{ path: Path; body: Body }>;
 let completionStatus: number;
 let completions: Body[];
+// Stories saved to the Shortlist before Create opens them; savesFail makes saving fail.
+let saves: Body[];
+let savesFail: boolean;
 let refreshes: Body[];
 
 const focus = "I build reliable cloud infrastructure.";
@@ -119,7 +122,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  errors = []; completions = []; calls = []; refreshes = [];
+  errors = []; completions = []; calls = []; refreshes = []; saves = []; savesFail = false;
   completionStatus = 200; handlers = { ...defaults };
   context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   await context.route("**/*", async (route) => {
@@ -145,6 +148,10 @@ beforeEach(async () => {
       return reply({ jobId: "refresh-job", status: "queued" }, 202);
     }
     if (url.pathname === "/api/inbox/refresh/refresh-job") return reply({ status: "active", progress: { articlesProcessed: 0, articlesMatched: 0, articlesCreated: 0 } });
+    if (url.pathname === "/api/search/news/save") {
+      saves.push(route.request().postDataJSON());
+      return savesFail ? reply({ message: "Couldn't save" }, 500) : reply({ id: "saved-story", status: "saved", articleUrl: "https://news.google.com/rss/articles/outage-saved" }, 201);
+    }
     errors.push(`Unexpected request: ${url.pathname}`);
     return reply({ message: "Unmocked request" }, 500);
   });
@@ -411,7 +418,9 @@ describe("finishing", () => {
     await browserExpect(story).toHaveAttribute("href", "https://news.google.com/rss/articles/outage");
     await page.getByRole("button", { name: "Write a post about Outage lessons from 2026", exact: true }).click();
     await browserExpect(page).toHaveURL(`${origin}/dashboard/create`);
-    expect(await page.evaluate(() => window.history.state?.createFromUrl)).toBe("https://news.google.com/rss/articles/outage");
+    // Saved first, so Pundit can write from the headline even if the page can't be read.
+    expect(saves).toEqual([{ url: "https://news.google.com/rss/articles/outage", title: "Outage lessons from 2026", source: "Cloud Weekly", publishedAt: "2026-09-22T10:00:00.000Z" }]);
+    expect(await page.evaluate(() => window.history.state?.createFromUrl)).toBe("https://news.google.com/rss/articles/outage-saved");
   });
 });
 
@@ -536,6 +545,17 @@ describe("one-click setup", () => {
   });
 
   it("drafts a post from the first story in one click", async () => {
+    await page.goto(`${origin}/onboarding`);
+    await message().fill(focus);
+    await setMeUp().click();
+    await page.getByRole("button", { name: "Draft a post from the first story", exact: true }).click();
+    await browserExpect(page).toHaveURL(`${origin}/dashboard/create`);
+    expect(saves).toHaveLength(1);
+    expect(await page.evaluate(() => window.history.state?.createFromUrl)).toBe("https://news.google.com/rss/articles/outage-saved");
+  });
+
+  it("still opens Create with the story's own link when saving it fails", async () => {
+    savesFail = true;
     await page.goto(`${origin}/onboarding`);
     await message().fill(focus);
     await setMeUp().click();

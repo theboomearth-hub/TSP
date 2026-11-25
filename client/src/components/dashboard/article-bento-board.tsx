@@ -87,6 +87,8 @@ export function ArticleBentoBoard({ composer: c }: Readonly<{ composer: CreatePo
         : "Blank document — write directly or attach an article";
   const saveDot = { loading: "bg-muted-foreground/50", saving: "bg-primary", saved: "bg-emerald-500", error: "bg-destructive", unsaved: "bg-amber-500" }[c.persistence.status];
   const charCount = c.main?.content.length ?? 0;
+  // The page couldn't be read, so Pundit wrote from the story's headlines; say so where the draft is.
+  const fromHeadlines = Boolean(c.main?.review?.evidence?.warnings.some(warning => warning.code === "headlines_only"));
   const toolbelt: { key: Action; label: string; value?: string; icon: typeof Wand2 }[] = [
     { key: "sources", label: "Attach articles", value: selectedArticles.length ? String(selectedArticles.length) : undefined, icon: Paperclip },
     { key: "tone", label: "Tone", value: toneLabel, icon: Wand2 },
@@ -221,6 +223,9 @@ export function ArticleBentoBoard({ composer: c }: Readonly<{ composer: CreatePo
           <div className="mb-5 flex min-h-11 flex-wrap items-center gap-2 border-b pb-3 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 font-medium text-foreground"><FileText className="h-3.5 w-3.5" />Your document</span>
             {c.canUndoSuggestion && <span role="status"> · AI update ready</span>}
+            {fromHeadlines && <button type="button" onClick={() => runAction("evidence")} title="The full article couldn't be read. Check the original before publishing."
+              className="inline-flex min-h-8 items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-1 font-medium text-amber-800 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-amber-300">
+              <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />Written from headlines</button>}
             <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-medium ${c.mainReady ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : "bg-muted"}`}>
               {c.mainReady ? <><Check className="h-3.5 w-3.5" />Ready to adapt</> : "Add a title and 20+ characters to adapt"}
             </span>

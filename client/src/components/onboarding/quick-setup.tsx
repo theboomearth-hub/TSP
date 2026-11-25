@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { OnboardingData } from "@/lib/onboarding-choices";
 import { browserSearchEdition, type PreviewHeadline, type SuggestionStep } from "@/lib/onboarding-suggestions";
-import { STORY_LINK_KEY } from "@/lib/create-story-link";
+import { saveStoryForCreate, STORY_LINK_KEY } from "@/lib/create-story-link";
 import { track } from "@/lib/analytics-consent";
 import { QUICK_STEPS, useQuickSetup, type QuickSetupState } from "@/hooks/use-quick-setup";
 import { useDiscoverPreview } from "@/hooks/use-discover-preview";
@@ -122,9 +122,12 @@ export function QuickSetup({ firstName, userIndustry, userCountry, completed, on
     setTypedAnswer("");
     void start(focus, { clarification: { question: state.question.text, answer: reply.trim().slice(0, 200) } });
   };
-  const writePost = (headline?: PreviewHeadline) => {
-    if (headline?.link) onLeave("/dashboard/create", { [STORY_LINK_KEY]: headline.link });
-    else onLeave("/dashboard/create");
+  const opening = useRef(false);
+  const writePost = async (headline?: PreviewHeadline) => {
+    if (opening.current) return;
+    opening.current = true;
+    const link = headline?.link ? await saveStoryForCreate({ ...headline, link: headline.link }) : undefined;
+    onLeave("/dashboard/create", link ? { [STORY_LINK_KEY]: link } : undefined);
   };
 
   let body;
