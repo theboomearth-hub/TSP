@@ -207,7 +207,7 @@ describe("UX audit screens (fully mocked Chromium)", () => {
     await resolvePending();
     expect(await page.evaluate(() => (window as any).__toasts)).toEqual([]);
   });
-  it("keeps agent failure optional and does not claim registration is the last step", async () => {
+  it("keeps agent failure optional and finishes registration without a form", async () => {
     await mount("wizard", [{ status: 500, body: { message: "Fixture unavailable" } }]);
     await page.setViewportSize({ width: 1280, height: 900 });
     await say("Product strategy for small teams");
@@ -217,8 +217,14 @@ describe("UX audit screens (fully mocked Chromium)", () => {
     await page.getByTestId("button-add-keyword").click();
     await page.getByRole("button", { name: "Finish setup" }).click();
     expect(await page.evaluate(() => (window as any).__completed[0].publications)).toEqual([]);
+    // Registration asks nothing now: it finishes the account from the sign-up name and moves on.
     await page.evaluate(() => (window as any).__setSurface("registration"));
-    await browserExpect(page.getByText("Workspace basics", { exact: true })).toBeVisible();
+    const registrations = async () => (await calls()).filter((call: any) => call.url === "/api/complete-registration");
+    await browserExpect.poll(async () => (await registrations()).length).toBe(1);
+    const [registration] = await registrations();
+    expect(registration.body).toMatchObject({ firstName: "Taylor", lastName: "Lee" });
+    expect(registration.body).not.toHaveProperty("industries");
+    expect(registration.body).not.toHaveProperty("countries");
     expect(await page.getByText(/One last step/).count()).toBe(0);
   });
   it("on a phone, switches between Pundit and the setup with the composer at hand, without horizontal scroll", async () => {

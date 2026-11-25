@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import { Check, Zap } from "lucide-react";
+import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -16,14 +16,6 @@ interface PunditPanelProps {
   thinking?: string;
   progress?: ProgressItem[];
   log: string[];
-}
-
-export function PunditAvatar({ size = 32 }: { size?: number }) {
-  return (
-    <span aria-hidden="true" className="flex shrink-0 items-center justify-center rounded-full bg-primary" style={{ width: size, height: size }}>
-      <Zap className="text-primary-foreground fill-primary-foreground" style={{ width: size / 2, height: size / 2 }} />
-    </span>
-  );
 }
 
 function StatusIcon({ state }: { state: ProgressItem["state"] }) {
@@ -45,7 +37,6 @@ export function PunditPanel({ className, messages, thinking, progress, log }: Re
   return (
     <section aria-label="Pundit" className={cn("min-h-0 flex-col bg-card lg:border-r", className)}>
       <div className="flex items-center gap-3 border-b px-5 py-4">
-        <PunditAvatar size={40} />
         <div>
           <h2 className="font-heading text-base font-semibold">Pundit</h2>
           <p className="text-sm text-muted-foreground">Your setup agent</p>
@@ -83,7 +74,6 @@ export function PunditPanel({ className, messages, thinking, progress, log }: Re
             }
             return (
               <li key={message.id} className="flex gap-3">
-                <PunditAvatar />
                 <div className="min-w-0 flex-1 space-y-2">
                   {"card" in message ? message.card : <p className="text-sm leading-relaxed [overflow-wrap:anywhere]">{message.text}</p>}
                   {"chips" in message && message.chips && message.chips.length > 0 && (
@@ -101,7 +91,7 @@ export function PunditPanel({ className, messages, thinking, progress, log }: Re
           })}
           {thinking && (
             <li className="flex items-center gap-3 text-sm text-muted-foreground" role="status">
-              <PunditAvatar /><span className="animate-pulse">{thinking}</span>
+              <span className="animate-pulse">{thinking}</span>
             </li>
           )}
         </ol>

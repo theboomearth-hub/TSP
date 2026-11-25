@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { ArrowRight, Check, RefreshCw, ShieldCheck, Zap } from "lucide-react";
+import { ArrowRight, Check, LockOpen, RefreshCw, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
@@ -151,9 +151,6 @@ export default function Pricing() {
                     <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Pro</p>
                     <p className="mt-1 font-heading text-xl font-semibold">Build momentum</p>
                   </div>
-                  <span className="grid h-10 w-10 place-items-center rounded-xl bg-primary text-primary-foreground">
-                    <Zap className="h-5 w-5" aria-hidden="true" />
-                  </span>
                 </div>
                 <div className="mt-6 grid grid-cols-2 gap-3">
                   {["Create", "Schedule", "Publish", "Measure"].map(item => (
@@ -210,7 +207,7 @@ export default function Pricing() {
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">Payments are handled securely by Razorpay. Your payment details are never stored by us.</p>
               </div>
               <div className="bg-card p-7">
-                <span className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-primary"><Zap className="h-5 w-5" aria-hidden="true" /></span>
+                <span className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-primary"><LockOpen className="h-5 w-5" aria-hidden="true" /></span>
                 <h2 className="mt-5 font-semibold text-foreground">No lock-in</h2>
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">One-time access does not renew automatically. Where recurring checkout is available, request cancellation from Billing.</p>
               </div>

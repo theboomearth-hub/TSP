@@ -212,7 +212,7 @@ describe("interactive app tour", () => {
     await browserExpect(page.getByTestId("dialog-app-tour")).toHaveCount(0);
   }, 20000);
 
-  it("lets the user skip setup steps and resumes in the workspace after setup is saved", async () => {
+  it("doesn't pop up after setup when the guide was skipped past it, and reopens at the next step", async () => {
     await page.goto(`${origin}/onboarding`);
     await assertStep("Start by talking to Pundit");
     await nextStep();
@@ -222,8 +222,23 @@ describe("interactive app tour", () => {
     await nextStep();
     await browserExpect(page.getByTestId("dialog-app-tour")).toHaveCount(0);
     await page.getByRole("button", { name: "Start my workspace", exact: true }).click();
+    await browserExpect(page.getByTestId("route")).toHaveText("/dashboard");
+    await browserExpect(page.getByTestId("dialog-app-tour")).toHaveCount(0);
+    await page.reload();
+    await browserExpect(page.getByTestId("dialog-app-tour")).toHaveCount(0);
+    await page.getByRole("button", { name: "Reopen tour" }).click();
     await assertStep("Connect an account (optional)");
   }, 20000);
+
+  it("closes when setup is saved while the guide isn't being followed, in both layouts", async () => {
+    await page.goto(`${origin}/onboarding`);
+    await assertStep("Start by talking to Pundit");
+    await page.getByRole("button", { name: "Start my workspace", exact: true }).click();
+    await browserExpect(page.getByTestId("route")).toHaveText("/dashboard");
+    await browserExpect(page.getByTestId("dialog-app-tour")).toHaveCount(0);
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem("tsp-app-tour:v3:user:a")!))).toMatchObject({ step: 3, dismissed: true });
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem("tsp-app-tour:inbox-v1:user:a")!))).toMatchObject({ dismissed: true });
+  });
 
   for (const outcome of ["scheduled", "published", "manual", "simulated", "attention"]) {
     it(`waits for the exact draft and confirmed ${outcome} result, including inside a modal`, async () => {

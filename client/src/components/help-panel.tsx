@@ -97,7 +97,8 @@ function HelpPanelBody({ phase, expanded, setExpanded, query, setQuery, close }:
   const [location] = useLocation();
   const search = useSearch();
   const { openTour } = useAppTour();
-  const pageIds = sectionsForLocation(location, search);
+  // Setup shows on the dashboard's own URL, so its help is chosen by phase, not by path.
+  const pageIds = phase === "setup" ? ["getting-started"] : sectionsForLocation(location, search);
   const searching = query.trim().length > 0;
   const results = HELP_SECTIONS.filter(section => matchesHelpQuery(section, query));
   const onPage = searching ? [] : HELP_SECTIONS.filter(section => pageIds.includes(section.id));

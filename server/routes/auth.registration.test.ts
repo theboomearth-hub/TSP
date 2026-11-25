@@ -22,6 +22,7 @@ import { registerAuthRoutes } from "./auth";
 
 const traveller = randomUUID();
 const oddBrowser = randomUUID();
+const nameOnly = randomUUID();
 const app = express();
 app.use(express.json());
 registerAuthRoutes(app);
@@ -35,12 +36,12 @@ beforeAll(async () => {
   const role = await pool.query("select rolsuper, rolbypassrls from pg_roles where rolname = current_user");
   expect(role.rows[0]).toEqual({ rolsuper: false, rolbypassrls: false });
   validated = true;
-  await ownerDb.insert(users).values([traveller, oddBrowser].map(id => ({ id, email: `${id}@example.invalid` })));
+  await ownerDb.insert(users).values([traveller, oddBrowser, nameOnly].map(id => ({ id, email: `${id}@example.invalid` })));
 });
 afterAll(async () => {
   if (validated) {
-    await ownerDb.delete(emailPreferences).where(inArray(emailPreferences.userId, [traveller, oddBrowser]));
-    await ownerDb.delete(users).where(inArray(users.id, [traveller, oddBrowser]));
+    await ownerDb.delete(emailPreferences).where(inArray(emailPreferences.userId, [traveller, oddBrowser, nameOnly]));
+    await ownerDb.delete(users).where(inArray(users.id, [traveller, oddBrowser, nameOnly]));
   }
   await pool.end(); await ownerPool.end();
 });
@@ -57,5 +58,13 @@ describe("POST /api/complete-registration", () => {
     const res = await request(app).post("/api/complete-registration").send({ ...details, timeZone: "Mars/Olympus_Mons" }).expect(200);
     expect(res.body).toMatchObject({ firstName: "Ana", country: "Brazil" });
     expect(await digestZone(oddBrowser)).toBeUndefined();
+  });
+
+  it("completes with just a name, so sign-up needs no form; onboarding infers industry and market", async () => {
+    signedIn.id = nameOnly;
+    const res = await request(app).post("/api/complete-registration").send({ firstName: "Ana", lastName: "Silva", timeZone: "Asia/Kolkata" }).expect(200);
+    expect(res.body).toMatchObject({ firstName: "Ana", country: null, industry: null, countries: [], industries: [] });
+    expect(res.body.registrationCompleted).toBeTruthy();
+    expect(await digestZone(nameOnly)).toBe("Asia/Kolkata");
   });
 });

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useSyncExternalStore } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useState, useSyncExternalStore } from "react";
 import { Route, useLocation, useSearch, Router as WouterRouter } from "wouter";
 import { accountCache, queryClient } from "./lib/queryClient";
 import { QueryClientProvider, useQuery } from "@tanstack/react-query";
@@ -53,6 +53,8 @@ function AppRoutes() {
 
   const authLoaded = !isPending;
   const signedIn = !!user;
+  // Setup was just saved here: its result stays on this page until the user moves on.
+  const [setupResultPath, setSetupResultPath] = useState<string | null>(null);
 
   // Only explicit local development bypass may replace a Better Auth session.
   // Otherwise fetching /api/me after logout can recreate cleared private data.
@@ -92,7 +94,13 @@ function AppRoutes() {
       onboardingStatus: profile?.onboardingStatus ?? null,
     },
     path: location,
+    setupResultPath,
   });
+
+  // Any navigation away (a button, the tour, Back) ends the result screen for good.
+  useEffect(() => {
+    if (setupResultPath !== null && location !== setupResultPath) setSetupResultPath(null);
+  }, [location, setupResultPath]);
 
   // Redirects run in an effect. The old code called setLocation() in the render
   // body, which React warns about and which duplicated an existing effect.
@@ -102,6 +110,7 @@ function AppRoutes() {
       rememberReturnTo(window.location.pathname + window.location.search);
       setLocation("/sign-in", { replace: true });
     }
+
   }, [gate, setLocation]);
 
   // Sign-in and sign-up sub-steps stay one page, so their forms keep state.
@@ -154,7 +163,7 @@ function AppRoutes() {
         scope={dbUser?.id && tenantId ? `${dbUser.id}:${tenantId}` : null}
         enabled={Boolean(dbUser?.registrationCompleted && tenantId)}
         phase="setup"
-      ><HelpProvider phase="setup"><div className="contents" data-clarity-mask="True"><Suspense fallback={<LoadingScreen />}><OnboardingPage /><PrerenderHandoff /><AnalyticsPage /></Suspense></div></HelpProvider></AppTourProvider>;
+      ><HelpProvider phase="setup"><div className="contents" data-clarity-mask="True"><Suspense fallback={<LoadingScreen />}><OnboardingPage onSetupSaved={() => setSetupResultPath(location)} onSetupDone={() => setSetupResultPath(null)} /><PrerenderHandoff /><AnalyticsPage /></Suspense></div></HelpProvider></AppTourProvider>;
 
     case "dashboard":
       // A failed background refresh must not destroy Settings or Create state.

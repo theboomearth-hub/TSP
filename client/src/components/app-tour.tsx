@@ -17,21 +17,21 @@ export type AppTourVariant = "classic" | "inbox";
 export const APP_TOUR_STEPS = [
   {
     title: "Start by talking to Pundit",
-    description: "Tell Pundit what you do and who you want to reach, then press Send. You can keep using the app while this guide is open, or select Next to keep exploring.",
+    description: "Tell Pundit what you do and who you want to reach, then send it. You can keep using the app while this guide is open, or select Next to keep exploring.",
     path: "/onboarding",
     targets: ['[aria-label="Message Pundit"]'],
   },
   {
     title: "Check what Pundit understood",
-    description: "Wait for Pundit's reply, answer any clarification and review the summary. Choose Build my setup, or Set up manually. Errors stay visible in the conversation; the tour waits for your choice.",
+    description: "Pundit replies with what it understood and builds your setup from today's news. Answer its question if it asks one. If you chose to pick everything yourself, choose Build my setup or Set up manually. Errors stay visible; the tour waits for Pundit to start.",
     path: "/onboarding",
     targets: ['[data-app-tour="setup-build"]', '[aria-label="Message Pundit"]'],
   },
   {
     title: "Review your curated setup",
-    description: "Review the suggested sources, topics, people and companies, or add your own. Choose at least one topic, company or person, then press Start my workspace. This step only completes after the server confirms your setup was saved.",
+    description: "Pundit saves the sources, topics, people and companies it found and shows what it set up; you can change them later in Settings. If you're picking them yourself, choose at least one topic, company or person, then press Start my workspace. This step only completes after the server confirms your setup was saved.",
     path: "/onboarding",
-    targets: ['[data-testid="button-complete-onboarding"]', '[data-app-tour="setup-tab"]'],
+    targets: ['[data-app-tour="setup-result"]', '[data-testid="button-complete-onboarding"]', '[data-app-tour="setup-tab"]'],
   },
   {
     title: "Connect an account (optional)",
@@ -463,6 +463,15 @@ function VariantTourProvider({ children, scope, enabled, phase = "workspace", va
 
   const report = useCallback((event: TourEvent, savedDraftId?: string, result?: TourOutcome) => {
     const current = progressRef.current;
+    // Setup saved while the guide isn't open on its last setup step: it isn't being followed,
+    // so it must not pop up over the new workspace. App tour reopens it at the next step.
+    if (event === "setup-saved" && phase === "setup" && !(openRef.current && current.step === FIRST_WORKSPACE_STEP - 1)) {
+      persist({ ...current, step: Math.max(current.step, FIRST_WORKSPACE_STEP), ready: false, dismissed: true });
+      if (scope) shareDismissal(config, scope, false);
+      setIsOpen(false);
+      openRef.current = false;
+      return;
+    }
     if (!openRef.current || current.ready || config.stepEvents[current.step] !== event) return;
     if (current.step >= config.draftBindingFromStep && (!savedDraftId || (current.draftId && savedDraftId !== current.draftId))) return;
     if (event === "draft-saved" && !savedDraftId) return;
@@ -474,7 +483,7 @@ function VariantTourProvider({ children, scope, enabled, phase = "workspace", va
     setReady(true);
     setDraftId(next.draftId);
     setOutcome(next.outcome);
-  }, [persist, config]);
+  }, [persist, config, phase, scope]);
 
   const advance = useCallback(() => {
     const current = progressRef.current;

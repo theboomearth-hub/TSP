@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { WeightedKeyword } from "@shared/profile-preferences";
+import type { OnboardingData } from "./onboarding-choices";
 import type { SearchEditionId } from "@shared/search-editions";
 import { parsePublicationCandidate } from "./publication-candidates";
 
@@ -116,6 +117,60 @@ export function parseAgentEvent(value: unknown): AgentEvent | null {
     try { return { type: "result", step: step.data, result: parseOnboardingSuggestions(step.data, event) }; } catch { return null; }
   }
   return null;
+}
+
+export type QuickSetupSummary = Omit<Understanding, "question">;
+export type QuickSetupEvent =
+  | { type: "understanding"; understanding: QuickSetupSummary }
+  | { type: "question"; question: { text: string; options: string[] } }
+  | { type: "progress"; step: SuggestionStep | null; message: string }
+  | { type: "result"; step: SuggestionStep; result: SuggestionResult }
+  | { type: "error"; step: SuggestionStep | null; code: string; retryAfterSeconds?: number }
+  /** `degraded`: the AI couldn't help with part of it, so some picks came from the user's own words. */
+  | { type: "saved"; setup: OnboardingData; degraded: boolean }
+  | { type: "done" };
+
+const savedSetup = z.object({
+  focusDescription: z.string().trim().min(1).max(500),
+  publications: textList(100, 20),
+  publicationCandidates: z.array(z.unknown()).catch([]).default([]),
+  keywords: z.array(z.unknown()).catch([]).default([]),
+  influencers: textList(100, 20),
+  companies: textList(100, 20),
+});
+
+/** Quick setup's stream is untrusted too: unknown or malformed events are ignored. */
+export function parseQuickSetupEvent(value: unknown): QuickSetupEvent | null {
+  if (!value || typeof value !== "object") return null;
+  const event = value as Record<string, unknown>;
+  if (event.type === "understanding") {
+    const { question: _question, ...understanding } = parseUnderstanding(event.understanding ?? {});
+    return understanding.role || understanding.industry || understanding.focusAreas.length ? { type: "understanding", understanding } : null;
+  }
+  if (event.type === "question") {
+    const question = parseUnderstanding({ question: event.question }).question;
+    return question ? { type: "question", question } : null;
+  }
+  if (event.type === "saved") {
+    const parsed = savedSetup.safeParse(event.setup);
+    if (!parsed.success) return null;
+    const { publicationCandidates, keywords, ...lists } = parsed.data;
+    const candidates = publicationCandidates.flatMap(candidate => {
+      const parsedCandidate = parsePublicationCandidate(candidate);
+      return parsedCandidate ? [parsedCandidate] : [];
+    });
+    const weighted = keywords.flatMap(entry => {
+      const keyword = z.object({ keyword: z.string().trim().min(1).max(100), weight: z.number().finite().min(0).max(1).catch(0.7) }).safeParse(entry);
+      return keyword.success ? [keyword.data] : [];
+    }).slice(0, 20);
+    const setup: OnboardingData = { ...lists, keywords: weighted, ...(candidates.length ? { publicationCandidates: candidates } : {}) };
+    return { type: "saved", setup, degraded: event.degraded === true };
+  }
+  if (event.type === "progress" && event.step === null) {
+    return typeof event.message === "string" && event.message.trim() ? { type: "progress", step: null, message: event.message.trim().slice(0, 240) } : null;
+  }
+  // Step progress, results, errors and done read the same as the agent's.
+  return parseAgentEvent(value);
 }
 
 /** Read a server-sent event stream, calling `onEvent` with each decoded `data:` payload. */

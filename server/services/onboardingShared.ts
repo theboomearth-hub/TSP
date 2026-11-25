@@ -2,9 +2,35 @@ import { z } from "zod";
 import { redis } from "../lib/redis";
 import { AIGenerationError, generateText } from "./openRouter";
 
-/** Helpers shared by the onboarding understanding, suggestion and agent services. */
+/** Helpers shared by the onboarding understanding, suggestion, agent and quick-setup services. */
 export const key = (value: string) => value.trim().toLowerCase();
 export const short = (value: string) => value.replace(/\s+/g, " ").trim().slice(0, 80);
+
+// A provider that did not answer may answer a moment later. Quota and rate-limit failures put
+// the provider in a cooldown of a minute or more, where an immediate retry cannot help.
+export const RETRYABLE_AI_CODES = new Set(["ai_unavailable", "ai_busy"]);
+export const DEFAULT_RETRY_DELAY_MS = 1500;
+
+export function wait(ms: number, signal: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) return reject(signal.reason);
+    const timer = setTimeout(() => { signal.removeEventListener("abort", onAbort); resolve(); }, ms);
+    const onAbort = () => { clearTimeout(timer); reject(signal.reason); };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/** Run AI-backed work, trying once more after a short pause when the provider didn't answer. */
+export async function withOneRetry<T>(work: () => Promise<T>, signal: AbortSignal, onRetry: () => void, retryDelayMs = DEFAULT_RETRY_DELAY_MS): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (signal.aborted || !(error instanceof AIGenerationError) || !RETRYABLE_AI_CODES.has(error.code)) throw error;
+    onRetry();
+    await wait(retryDelayMs, signal);
+    return work();
+  }
+}
 
 export async function askJson<S extends z.ZodTypeAny>(prompt: string, schema: S, scope: { tenantId: string }, signal?: AbortSignal,
   { maxTokens = 4096, timeoutMs = 20_000 }: { maxTokens?: number; timeoutMs?: number } = {}): Promise<z.infer<S>> {

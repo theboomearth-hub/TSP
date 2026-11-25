@@ -38,6 +38,8 @@ export interface GateInput {
   };
   /** Current location, without the router base path. */
   path: string;
+  /** Where setup was just saved: its result stays on that page until the user moves on. */
+  setupResultPath?: string | null;
 }
 
 /** Routes reachable without being signed in. */
@@ -95,7 +97,7 @@ function isProtectedPath(path: string): boolean {
 }
 
 export function resolveGate(input: GateInput): GateState {
-  const { authLoaded, signedIn, me, profile, path } = input;
+  const { authLoaded, signedIn, me, profile, path, setupResultPath = null } = input;
 
   if (!authLoaded) return "loading";
 
@@ -126,11 +128,11 @@ export function resolveGate(input: GateInput): GateState {
   // Must precede the onboarding branch, for the same reason.
   if (profile.status === "error") return "auth-error";
 
+  // One place, not two pages: setup appears on the app's own pages until it is done (and while
+  // its result is still on screen). /onboarding survives only as an old link to the dashboard.
+  if (path === "/onboarding") return "redirect-dashboard";
   const onboardingComplete = profile.onboardingStatus === "completed";
-  if (
-    path === "/onboarding" ||
-    (!onboardingComplete && (path.startsWith("/dashboard") || path.startsWith("/admin")))
-  ) {
+  if ((!onboardingComplete || path === setupResultPath) && (path.startsWith("/dashboard") || path.startsWith("/admin"))) {
     return "onboarding";
   }
 

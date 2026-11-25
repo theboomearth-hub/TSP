@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { Send, Sparkles } from "lucide-react";
-import { Link, useLocation } from "wouter";
+import { Send } from "lucide-react";
+import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { fieldControlClassName } from "@/components/ui/field";
@@ -16,10 +16,9 @@ import { PunditPanel, type PanelMessage, type ProgressItem } from "@/components/
 import { SetupCanvas } from "@/components/onboarding/setup-canvas";
 import { SetupSection, type SectionKind } from "@/components/onboarding/setup-section";
 import { UnderstandingCard } from "@/components/onboarding/understanding-card";
-import { OnboardingProgress } from "@/components/onboarding/onboarding-progress";
 import { RefineScope } from "@/components/onboarding/refine-scope";
-import { AppTourButton, useAppTourSignal } from "@/components/app-tour";
-import { HelpButton } from "@/components/help-panel";
+import { useAppTourSignal } from "@/components/app-tour";
+import { OnboardingHeader } from "@/components/onboarding/onboarding-header";
 
 interface OnboardingWorkspaceProps {
   onComplete: (data: OnboardingData) => void;
@@ -28,6 +27,8 @@ interface OnboardingWorkspaceProps {
   userCountry?: string;
   /** What was saved; the workspace then shows the finish view. */
   completed?: OnboardingData | null;
+  /** Move on from the finish view to a page (with optional history state), or to the app. */
+  onLeave?: (to?: string, state?: Record<string, unknown>) => void;
 }
 
 type Stored =
@@ -55,8 +56,9 @@ const lower = (value: string) => value.trim().toLowerCase();
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 /** Onboarding as one workspace: Pundit's conversation on the left, your setup filling in on the right. */
-export function OnboardingWorkspace({ onComplete, isPending = false, userIndustry, userCountry, completed = null }: Readonly<OnboardingWorkspaceProps>) {
-  const [, navigate] = useLocation();
+export function OnboardingWorkspace({ onComplete, isPending = false, userIndustry, userCountry, completed = null, onLeave }: Readonly<OnboardingWorkspaceProps>) {
+  const [, setLocation] = useLocation();
+  const navigate = (to?: string, options?: { state: Record<string, unknown> }) => onLeave ? onLeave(to, options?.state) : setLocation(to ?? "/dashboard", options);
   const [focus, setFocus] = useState("");
   const [draft, setDraft] = useState("");
   const [mode, setMode] = useState<"none" | "agent" | "manual">("none");
@@ -212,7 +214,7 @@ export function OnboardingWorkspace({ onComplete, isPending = false, userIndustr
         primary: true,
         disabled: previewPending,
         onClick: () => previewReady ? writePost(preview.headlines[0]) : navigate("/dashboard/discover"),
-      }, { label: "Go to my dashboard", onClick: () => navigate("/dashboard") });
+      }, { label: "Go to my dashboard", onClick: () => navigate() });
     }
     if (message.step && latestNote.get(message.step) === message.id && mode === "agent" && !completed && agent.state[message.step].status === "ready") {
       const step = message.step;
@@ -271,37 +273,16 @@ export function OnboardingWorkspace({ onComplete, isPending = false, userIndustr
   ].filter(Boolean).join(" · ") || "Your focus is saved." : "";
   const placeholder = completed ? "Your setup is saved" : mode !== "none" ? `Ask Pundit to change ${TITLES[about].toLowerCase()}…`
     : !focus ? "Tell Pundit what you do and who you want to reach…" : summary?.question ? "Answer Pundit, or add more about your work…" : "Add more about your work…";
-  const currentStep: 2 | 3 = mode === "none" && !completed ? 2 : 3;
   const stepCount = (step: SuggestionStep) =>
     step === "publications" ? sources.length : step === "topics" ? topics.length : leaders.length + companies.length;
 
   return (
     <div className="flex h-[100dvh] flex-col overflow-hidden bg-muted/30">
-      <header className="shrink-0 border-b bg-card/95 px-4 py-3 backdrop-blur sm:px-6">
-        <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-4">
-        <Link href="/"><span className="flex cursor-pointer items-center gap-2" data-testid="link-logo-onboarding">
-          <img src="/logo-mark.png" alt="" className="h-7 w-7 rounded-md" aria-hidden="true" /><span className="font-heading text-lg font-bold text-primary">TheSocialPundit</span>
-        </span></Link>
-          <div className="flex items-center gap-2">
-          <div className="hidden items-center gap-2 rounded-full border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground sm:flex">
-            <Sparkles className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
-            Personalizing your workspace
-          </div>
-          <HelpButton />
-          <AppTourButton />
-          </div>
-        </div>
-      </header>
+      <OnboardingHeader />
       <div className="shrink-0 border-b bg-card px-4 py-3 sm:px-6">
-        <div className="mx-auto grid max-w-[1600px] grid-cols-1 items-center gap-3 lg:grid-cols-[minmax(280px,440px)_minmax(0,1fr)] lg:gap-8">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">Step {currentStep} of 3</p>
-            <p className="mt-0.5 text-sm font-medium">
-              {completed ? "Your personalized workspace is ready" : currentStep === 2 ? "Describe your work in your own words" : "Review and tune your recommendations"}
-            </p>
-          </div>
-          <OnboardingProgress currentStep={currentStep} completed={Boolean(completed)} className="max-w-2xl lg:justify-self-end lg:w-full" />
-        </div>
+        <p className="mx-auto max-w-[1600px] text-sm font-medium">
+          {completed ? "Your personalized workspace is ready" : mode === "none" ? "Describe your work in your own words" : "Review and tune your recommendations"}
+        </p>
       </div>
       <div role="tablist" aria-label="Onboarding" className="flex shrink-0 gap-1 border-b bg-muted p-1 lg:hidden">
         {(["pundit", "setup"] as const).map(value => (
@@ -317,7 +298,7 @@ export function OnboardingWorkspace({ onComplete, isPending = false, userIndustr
           progress={progress} log={log} />
         <SetupCanvas className={cn("col-start-1 row-start-1 lg:col-start-2 lg:row-span-2", tab === "setup" ? "flex" : "hidden lg:flex")}
           view={view} count={selections.count} canFinish={canFinish} focusReady={focusReady} isPending={isPending} onFinish={finish}
-          finished={completed ? { summary: summaryText, preview, onWritePost: writePost, onOpenDiscover: () => navigate("/dashboard/discover"), onOpenDashboard: () => navigate("/dashboard") } : undefined}>
+          finished={completed ? { summary: summaryText, preview, onWritePost: writePost, onOpenDiscover: () => navigate("/dashboard/discover"), onOpenDashboard: () => navigate() } : undefined}>
           {section("publications", (
             <div className="space-y-2">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center">

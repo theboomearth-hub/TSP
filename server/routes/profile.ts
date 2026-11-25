@@ -4,40 +4,16 @@ import { authedOf, requireDbUser } from "../middlewares/requireDbUser";
 import { requirePermission } from "../middlewares/requirePermission";
 import { engineRegistry } from "../services/engines/index.js";
 import { storage } from "../storage";
-import { users } from "@shared/models/auth";
-import { INDUSTRY_SLUGS, platformIntegrations } from "@shared/schema";
-import {
-  focusDescriptionSchema, profileFocusDescriptionSchema, profileKeywordsSchema,
-  profileListSchema, timezoneSchema,
-} from "@shared/profile-preferences";
+import { candidatesAreSelected, completeOnboarding, completeOnboardingSchema, profileLists } from "../services/onboardingCompletion";
+import { platformIntegrations } from "@shared/schema";
+import { profileFocusDescriptionSchema, timezoneSchema } from "@shared/profile-preferences";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { filterEnabledPlatforms } from "../lib/platformAvailability";
-import { publicationCandidatesSchema, reconcilePublicationCandidates, type PublicationCandidate } from "@shared/publication-preferences";
 import { searchEditionSchema } from "@shared/search-editions";
 import { getEmailPreferences, updateEmailPreferences } from "../services/email/preferences";
 import { legacyNotificationView } from "@shared/email-preferences";
 import { PUBLISHING_PLATFORM_KEYS } from "@shared/publishing-capabilities";
-
-function candidatesAreSelected(names: string[], candidates: PublicationCandidate[] = []) {
-  return reconcilePublicationCandidates(names, candidates).length === candidates.length;
-}
-
-const profileLists = {
-  publications: profileListSchema.optional(),
-  publicationCandidates: publicationCandidatesSchema.optional(),
-  keywords: profileKeywordsSchema.optional(),
-  influencers: profileListSchema.optional(),
-  companies: profileListSchema.optional(),
-};
-
-const completeOnboardingSchema = z.object({
-  ...profileLists,
-  focusDescription: focusDescriptionSchema,
-  recommendedIndustry: z.enum(INDUSTRY_SLUGS).optional(),
-}).refine(data => candidatesAreSelected(data.publications ?? [], data.publicationCandidates), {
-  path: ["publicationCandidates"], message: "Publication candidates must match selected publication names",
-});
 
 const profilePatchSchema = z.object({
   ...profileLists,
@@ -148,33 +124,8 @@ export function registerProfileRoutes(app: Express) {
         return res.status(400).json({ message: "Invalid request data", errors: validation.error.errors });
       }
       
-      const { focusDescription, publications, publicationCandidates, keywords, influencers, companies, recommendedIndustry } = validation.data;
-
-      if (recommendedIndustry) {
-        await db.update(users).set({ industry: recommendedIndustry }).where(eq(users.id, userId));
-        console.log(`[Onboarding] Updated user ${userId} industry to: ${recommendedIndustry}`);
-      }
-
-      let profile = await storage.getUserProfile(scope);
-      
-      const profileData = {
-        focusDescription,
-        onboardingStatus: "completed" as const,
-        publications: publications || [],
-        ...(publicationCandidates !== undefined ? { publicationCandidates } : {}),
-        keywords: keywords || [],
-        influencers: influencers || [],
-        companies: companies || [],
-        recommendedIndustry: recommendedIndustry || undefined,
-      };
-
-      if (!profile) {
-        profile = await storage.createUserProfile(scope, profileData);
-      } else {
-        profile = await storage.updateUserProfile(scope, profileData);
-      }
-
-      const industryToUse = recommendedIndustry || "other";
+      const profile = await completeOnboarding(scope, userId, validation.data);
+      const industryToUse = validation.data.recommendedIndustry || "other";
       const engine = engineRegistry.getEngine(industryToUse);
       
       res.json({

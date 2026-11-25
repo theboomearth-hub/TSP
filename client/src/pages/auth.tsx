@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/
 import { useQuery } from "@tanstack/react-query";
 import { FaLinkedin } from "react-icons/fa";
 import { SiGoogle } from "react-icons/si";
-import { ArrowRight, Eye, EyeOff, Rss, Sparkles, ShieldCheck, Zap } from "lucide-react";
+import { ArrowRight, Eye, EyeOff, Rss, Sparkles, ShieldCheck } from "lucide-react";
 import type { ComponentType } from "react";
 import { takeReturnTo } from "@/lib/return-to";
 import { track } from "@/lib/analytics-consent";
@@ -183,7 +183,7 @@ function AuthCard({ pageTitle, title, description, children }: Readonly<{ pageTi
 function BrandPanel() {
   return <aside className="relative hidden overflow-hidden border-r bg-card text-card-foreground lg:flex lg:min-h-[100dvh] lg:flex-col lg:justify-between lg:p-12 xl:p-16">
     <div className="relative">
-      <div className="flex items-center gap-2 text-sm font-semibold tracking-tight"><span className="flex h-9 w-9 items-center justify-center rounded-md bg-primary text-primary-foreground"><Zap className="h-5 w-5 fill-current" /></span><span>TheSocialPundit</span></div>
+      <div className="flex items-center gap-2 text-sm font-semibold tracking-tight"><img src="/logo-mark.png" alt="" aria-hidden="true" className="h-9 w-9 rounded-md" /><span>TheSocialPundit</span></div>
       <div className="mt-24 max-w-xl xl:mt-32"><p className="mb-5 text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">Your professional signal</p><h2 className="font-serif text-4xl font-semibold leading-[1.08] tracking-tight xl:text-6xl">Turn what you know into what people remember.</h2><p className="mt-6 max-w-lg text-base leading-relaxed text-muted-foreground xl:text-lg">Stay close to the conversations shaping your industry, then publish a point of view that sounds like you.</p></div>
     </div>
     <div className="relative mt-12 max-w-xl">
@@ -195,7 +195,7 @@ function BrandPanel() {
 }
 
 function MobileBrand() {
-  return <div className="mb-6 flex items-center gap-2 lg:hidden"><span className="flex h-8 w-8 items-center justify-center rounded-[4px] bg-primary text-primary-foreground"><Zap className="h-4 w-4 fill-current" /></span><div><p className="text-sm font-semibold">TheSocialPundit</p><p className="text-xs text-muted-foreground">Your professional signal</p></div></div>;
+  return <div className="mb-6 flex items-center gap-2 lg:hidden"><img src="/logo-mark.png" alt="" aria-hidden="true" className="h-8 w-8 rounded-[4px]" /><div><p className="text-sm font-semibold">TheSocialPundit</p><p className="text-xs text-muted-foreground">Your professional signal</p></div></div>;
 }
 
 function PreviewStep({ icon: Icon, label, text }: Readonly<{ icon: ComponentType<{ className?: string }>; label: string; text: string }>) {

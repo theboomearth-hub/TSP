@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { cn } from "@/lib/utils";
 import type { PreviewHeadline } from "@/lib/onboarding-suggestions";
+import { DiscoverPreview, type DiscoverPreviewState } from "@/components/onboarding/discover-preview";
 
 interface SetupCanvasProps {
   className?: string;
@@ -18,7 +19,7 @@ interface SetupCanvasProps {
   children?: ReactNode;
   finished?: {
     summary: string;
-    preview: { status: "idle" | "loading" | "ready" | "empty"; headlines: PreviewHeadline[]; hasTopics: boolean };
+    preview: DiscoverPreviewState;
     onWritePost: (headline: PreviewHeadline) => void;
     onOpenDiscover: () => void;
     onOpenDashboard: () => void;
@@ -43,34 +44,7 @@ export function SetupCanvas({ className, view, count, canFinish, focusReady, isP
             <h1 className="font-heading text-2xl font-semibold sm:text-3xl">Your Discover is ready</h1>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{finished.summary}</p>
           </div>
-          <section aria-label="Discover preview" className="space-y-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">In your feed today</p>
-            {preview.status === "loading" && <p role="status" className="animate-pulse text-sm text-muted-foreground">Finding recent articles on your topics…</p>}
-            {preview.status === "empty" && (
-              <p className="text-sm text-muted-foreground">{preview.hasTopics ? "Discover fills in the first time you refresh it." : "Pick a few topics in Settings so Discover knows what to look for."}</p>
-            )}
-            {preview.status === "ready" && (
-              <ul className="space-y-3">
-                {preview.headlines.map(headline => (
-                  <li key={headline.title} className="flex flex-col gap-3 rounded-xl border bg-card p-4 sm:flex-row sm:items-center">
-                    <div className="min-w-0 flex-1">
-                      {headline.link
-                        ? <a href={headline.link} target="_blank" rel="noopener noreferrer" className="font-medium leading-snug hover:underline [overflow-wrap:anywhere]">{headline.title}</a>
-                        : <span className="font-medium leading-snug">{headline.title}</span>}
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {[headline.source, headline.publishedAt ? new Date(headline.publishedAt).toLocaleDateString() : "", `on ${headline.topic}`].filter(Boolean).join(" · ")}
-                      </p>
-                    </div>
-                    {headline.link && (
-                      <Button type="button" variant="outline" size="sm" aria-label={`Write a post about ${headline.title}`} onClick={() => finished.onWritePost(headline)}>
-                        Write a post
-                      </Button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+          <DiscoverPreview preview={preview} onWritePost={finished.onWritePost} />
           <div className="flex flex-col gap-3 sm:flex-row">
             <Button type="button" onClick={finished.onOpenDiscover}>Open Discover</Button>
             <Button type="button" variant="outline" onClick={finished.onOpenDashboard}>Go to dashboard</Button>

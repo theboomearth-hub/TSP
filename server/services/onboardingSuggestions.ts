@@ -89,9 +89,19 @@ USER: ${context(request)}`, z.object({ phrases: z.array(z.string().trim().min(2)
     return phrases.slice(0, 4);
   } catch (error) {
     if (signal?.aborted) throw error;
-    // Without the model, split the focus into short clauses.
-    return request.focusDescription.split(/[,.;]|\band\b|\bfocused on\b/i).map(part => part.trim().split(/\s+/).slice(-4).join(" ")).filter(part => part.length >= 4).slice(0, 3);
+    return phrasesFromFocus(request.focusDescription);
   }
+}
+
+// Who they write for is their audience, not news to follow ("writing for agencies and brands").
+const AUDIENCE_CLAUSE = /\b(?:(?:writing|posting|creating content|speaking|talking|selling)\s+(?:for|to)|reaching|helping)\b[^,.;]*/gi;
+const LEADING_FILLER = /^(?:(?:a|an|the|my|our|i|we)\s+)+/i;
+
+/** Search phrases (and fallback topics) without the model: the focus split into short clauses. */
+export function phrasesFromFocus(focus: string): string[] {
+  return focus.replace(AUDIENCE_CLAUSE, "").split(/[,.;]|\band\b|\bfocused on\b/i)
+    .map(part => part.trim().split(/\s+/).slice(-4).join(" ").replace(LEADING_FILLER, "").trim())
+    .filter(part => part.length >= 4).slice(0, 3);
 }
 
 function contextualSearchPhrases(request: OnboardingSuggestionRequest): string[] {
@@ -346,4 +356,100 @@ export async function suggestOnboardingItems(input: OnboardingSuggestionRequest,
   onProgress(pickedMessage(result));
   await rememberJson(cacheKey, result);
   return result;
+}
+
+export type StepResponse = Exclude<OnboardingSuggestionResponse, { step: "preview" }>;
+export type ResearchStep = StepResponse["step"];
+export const RESEARCH_STEPS: readonly ResearchStep[] = ["publications", "topics", "people"];
+const POOL_QUERIES = 6;
+const POOL_HEADLINES = 90;
+const QUICK_CACHE_VERSION = 1;
+
+/** Up to `max` unique headlines, taking from each query in turn so every query contributes. */
+async function pooledHeadlines(queries: string[], searchEdition: OnboardingSuggestionRequest["searchEdition"], signal?: AbortSignal, max = POOL_HEADLINES): Promise<NewsHeadline[]> {
+  const lists = (await Promise.allSettled(queries.map(query => fetchNewsHeadlines(query, searchEdition, signal))))
+    .map(result => result.status === "fulfilled" ? result.value : []);
+  const seen = new Set<string>();
+  const pool: NewsHeadline[] = [];
+  for (let round = 0; pool.length < max && lists.some(list => list.length > round); round++) {
+    for (const list of lists) {
+      const headline = list[round];
+      if (!headline || pool.length >= max || seen.has(key(headline.title))) continue;
+      seen.add(key(headline.title));
+      pool.push(headline);
+    }
+  }
+  return pool;
+}
+
+export interface ResearchHandlers {
+  progress: (step: ResearchStep | null, message: string) => void;
+  result: (result: StepResponse) => void;
+  /** A failed step; the other steps carry on. */
+  error: (step: ResearchStep, error: unknown) => void;
+}
+export type ResearchInput = Omit<OnboardingSuggestionRequest, "step" | "publications" | "topics" | "exclude" | "instruction"> & {
+  /** Phrases from the understanding call; without them the focus itself is searched. */
+  searchPhrases?: string[];
+};
+
+/**
+ * Quick setup's research: one shared news search, then sources, topics and people chosen in
+ * parallel from the same headlines. Same prompts, grounding rules and pick counts as the
+ * step-by-step pipeline; each step is reported as soon as it is ready.
+ */
+export async function researchAllSteps(input: ResearchInput, scope: { tenantId: string }, signal: AbortSignal, handlers: ResearchHandlers,
+  { retry = <T>(work: () => Promise<T>) => work() }: { retry?: <T>(work: () => Promise<T>, step: ResearchStep) => Promise<T> } = {}): Promise<Partial<Record<ResearchStep, StepResponse>>> {
+  const { searchPhrases: phrases = [], ...base } = input;
+  const request = onboardingSuggestionRequestSchema.parse({ ...base, step: "publications" });
+  const cacheKey = (step: ResearchStep) => `onboarding:quick:v${QUICK_CACHE_VERSION}:${createHash("sha256").update(JSON.stringify({ ...request, step, phrases })).digest("hex")}`;
+  // The understanding's phrases first (the most specific), then the focus areas; first spelling wins.
+  const seenQueries = new Set<string>();
+  const queries = [...(phrases.length ? phrases : phrasesFromFocus(request.focusDescription)), ...contextualSearchPhrases(request)]
+    .map(query => short(query)).filter(query => query && !seenQueries.has(key(query)) && Boolean(seenQueries.add(key(query)))).slice(0, POOL_QUERIES);
+  const excluded = new Set<string>();
+
+  // Every step reads the same headlines; fetch them only when a step isn't cached.
+  let pool: Promise<NewsHeadline[]> | undefined;
+  const headlines = () => pool ??= (async () => {
+    handlers.progress(null, `Searching Google News for ${queries.map(query => `"${query}"`).join(", ")}`);
+    const found = await pooledHeadlines(queries, request.searchEdition, signal);
+    handlers.progress(null, found.length
+      ? `Found ${found.length} recent articles from ${new Set(found.map(headline => key(headline.source))).size} publications`
+      : "The news search came back empty, so I'm using what I already know");
+    return found;
+  })();
+
+  const research = async (step: ResearchStep): Promise<StepResponse> => {
+    const stepRequest = { ...request, step };
+    const found = await headlines();
+    if (!found.length) return suggestWithoutNews(stepRequest, excluded, scope, signal);
+    handlers.progress(step, SEARCHING[step]);
+    if (step === "publications") {
+      const { items, note, followUps } = await suggestPublications(stepRequest, found, excluded, scope, signal);
+      return { step, grounded: true, items, picks: items.slice(0, PICKS.publications).map(item => item.name), note, followUps };
+    }
+    if (step === "topics") {
+      const { items, note, followUps } = await suggestTopics(stepRequest, found, excluded, scope, signal);
+      return { step, grounded: true, items, picks: items.slice(0, PICKS.topics).map(item => item.name), note, followUps };
+    }
+    const { people, companies, note, followUps } = await suggestPeople(stepRequest, found, excluded, scope, signal);
+    return { step, grounded: true, people, companies, ...choicePicks({ people, companies }), note, followUps };
+  };
+
+  const settled = await Promise.all(RESEARCH_STEPS.map(async step => {
+    try {
+      const hit = await cachedJson<StepResponse>(cacheKey(step));
+      const result = hit ?? await retry(() => research(step), step);
+      handlers.progress(step, pickedMessage(result));
+      if (!hit) await rememberJson(cacheKey(step), result);
+      handlers.result(result);
+      return [step, result] as const;
+    } catch (error) {
+      if (signal.aborted) throw error;
+      handlers.error(step, error);
+      return [step, undefined] as const;
+    }
+  }));
+  return Object.fromEntries(settled.filter(([, result]) => result)) as Partial<Record<ResearchStep, StepResponse>>;
 }
