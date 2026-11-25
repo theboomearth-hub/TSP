@@ -4,47 +4,17 @@ import { authedOf, requireDbUser } from "../middlewares/requireDbUser";
 import { requirePermission } from "../middlewares/requirePermission";
 import { engineRegistry } from "../services/engines/index.js";
 import { storage } from "../storage";
-import { users } from "@shared/models/auth";
-import { INDUSTRY_SLUGS, platformIntegrations } from "@shared/schema";
-import {
-  focusDescriptionSchema, profileFocusDescriptionSchema, profileKeywordsSchema,
-  profileListSchema, timezoneSchema,
-} from "@shared/profile-preferences";
+import { candidatesAreSelected, completeOnboarding, completeOnboardingSchema, profileLists } from "../services/onboardingCompletion";
+import { platformIntegrations } from "@shared/schema";
+import { profileFocusDescriptionSchema, timezoneSchema } from "@shared/profile-preferences";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
+import { TONE_VALUES } from "@shared/editorial";
 import { filterEnabledPlatforms } from "../lib/platformAvailability";
-import { publicationCandidatesSchema, reconcilePublicationCandidates, type PublicationCandidate } from "@shared/publication-preferences";
 import { searchEditionSchema } from "@shared/search-editions";
 import { getEmailPreferences, updateEmailPreferences } from "../services/email/preferences";
 import { legacyNotificationView } from "@shared/email-preferences";
 import { PUBLISHING_PLATFORM_KEYS } from "@shared/publishing-capabilities";
-
-function candidatesAreSelected(names: string[], candidates: PublicationCandidate[] = []) {
-  return reconcilePublicationCandidates(names, candidates).length === candidates.length;
-}
-
-const profileLists = {
-  publications: profileListSchema.optional(),
-  publicationCandidates: publicationCandidatesSchema.optional(),
-  keywords: profileKeywordsSchema.optional(),
-  influencers: profileListSchema.optional(),
-  companies: profileListSchema.optional(),
-};
-
-const completeOnboardingSchema = z.object({
-  ...profileLists,
-  focusDescription: focusDescriptionSchema,
-  recommendedIndustry: z.enum(INDUSTRY_SLUGS).optional(),
-}).refine(data => candidatesAreSelected(data.publications ?? [], data.publicationCandidates), {
-  path: ["publicationCandidates"], message: "Publication candidates must match selected publication names",
-});
-
-const quickOnboardingSchema = z.object({
-  focusDescription: focusDescriptionSchema,
-  industry: z.enum(INDUSTRY_SLUGS),
-  country: z.string().trim().min(2).max(100).default("Global"),
-  keywords: profileKeywordsSchema.refine((items) => items.length >= 1 && items.length <= 10, "Choose 1–10 keywords"),
-});
 
 const profilePatchSchema = z.object({
   ...profileLists,
@@ -53,7 +23,7 @@ const profilePatchSchema = z.object({
   timezone: timezoneSchema.optional(),
   enabledPlatforms: z.array(z.enum(PUBLISHING_PLATFORM_KEYS)).optional(),
   defaultPlatform: z.enum(PUBLISHING_PLATFORM_KEYS).optional(),
-  defaultTone: z.enum(["professional", "authoritative", "contrarian", "ai-recommended"]).optional(),
+  defaultTone: z.enum(TONE_VALUES).optional(),
   preferredPublishTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
   requirePublishReview: z.boolean().optional(),
   autoPublish: z.boolean().optional(),
@@ -155,33 +125,8 @@ export function registerProfileRoutes(app: Express) {
         return res.status(400).json({ message: "Invalid request data", errors: validation.error.errors });
       }
       
-      const { focusDescription, publications, publicationCandidates, keywords, influencers, companies, recommendedIndustry } = validation.data;
-
-      if (recommendedIndustry) {
-        await db.update(users).set({ industry: recommendedIndustry }).where(eq(users.id, userId));
-        console.log(`[Onboarding] Updated user ${userId} industry to: ${recommendedIndustry}`);
-      }
-
-      let profile = await storage.getUserProfile(scope);
-      
-      const profileData = {
-        focusDescription,
-        onboardingStatus: "completed" as const,
-        publications: publications || [],
-        ...(publicationCandidates !== undefined ? { publicationCandidates } : {}),
-        keywords: keywords || [],
-        influencers: influencers || [],
-        companies: companies || [],
-        recommendedIndustry: recommendedIndustry || undefined,
-      };
-
-      if (!profile) {
-        profile = await storage.createUserProfile(scope, profileData);
-      } else {
-        profile = await storage.updateUserProfile(scope, profileData);
-      }
-
-      const industryToUse = recommendedIndustry || "other";
+      const profile = await completeOnboarding(scope, userId, validation.data);
+      const industryToUse = validation.data.recommendedIndustry || "other";
       const engine = engineRegistry.getEngine(industryToUse);
       
       res.json({
@@ -191,49 +136,9 @@ export function registerProfileRoutes(app: Express) {
           displayName: engine.config.displayName,
         },
       });
-
     } catch (error) {
       console.error("Error completing onboarding:", error);
       res.status(500).json({ message: "Failed to complete onboarding" });
-    }
-  });
-
-  app.post("/api/onboarding/quick-start", requireDbUser, requirePermission("profile:write:own"), async (req, res) => {
-    const validation = quickOnboardingSchema.safeParse(req.body);
-    if (!validation.success) {
-      return res.status(400).json({ message: "Invalid quick-start data", errors: validation.error.errors });
-    }
-    try {
-      const { dbUser, tenant: scope } = authedOf(req);
-      const { focusDescription, industry, country, keywords } = validation.data;
-      await db.update(users).set({
-        country,
-        industry,
-        countries: [country],
-        industries: [industry],
-        registrationCompleted: dbUser.registrationCompleted ?? new Date(),
-        updatedAt: new Date(),
-      }).where(eq(users.id, dbUser.id));
-
-      const profileData = {
-        focusDescription,
-        onboardingStatus: "completed" as const,
-        recommendedIndustry: industry,
-        publications: [],
-        publicationCandidates: [],
-        keywords,
-        influencers: [],
-        companies: [],
-      };
-      const existing = await storage.getUserProfile(scope);
-      const profile = existing
-        ? await storage.updateUserProfile(scope, profileData)
-        : await storage.createUserProfile(scope, profileData);
-
-      res.json({ profile });
-    } catch (error) {
-      console.error("Error completing quick onboarding:", error);
-      res.status(500).json({ message: "Failed to start your LinkedIn workspace" });
     }
   });
 }

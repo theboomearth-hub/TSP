@@ -18,8 +18,23 @@ describe("understanding the user's focus", () => {
     reply({ role: " Head of Marketing ", industry: "Out-of-home advertising", focusAreas: ["Programmatic DOOH", " ", "programmatic dooh", "Measurement", "Retail media", "Transit media", "Creative", "Extra"], region: "India", audience: "Agencies and brands", question: null });
     expect(await understandFocus({ focusDescription: focus }, scope)).toEqual({
       role: "Head of Marketing", industry: "Out-of-home advertising", focusAreas: ["Programmatic DOOH", "Measurement", "Retail media", "Transit media", "Creative"],
-      region: "India", audience: "Agencies and brands", question: null,
+      region: "India", audience: "Agencies and brands", question: null, searchPhrases: [], category: null,
     });
+  });
+
+  it("returns search phrases and the closest built-in industry, so quick setup needs no second AI call", async () => {
+    reply({ role: "Head of Marketing", industry: "Out-of-home advertising", focusAreas: ["Programmatic DOOH"], region: "India", audience: null, question: null,
+      searchPhrases: ["programmatic DOOH India", " ", "Programmatic DOOH india", "OOH measurement", "retail media networks", "transit ads", "extra"], category: "media & advertising" });
+    const result = await understandFocus({ focusDescription: focus }, scope);
+    expect(result.searchPhrases).toEqual(["programmatic DOOH India", "OOH measurement", "retail media networks", "transit ads"]);
+    expect(result.category).toBe("media_advertising");
+    expect(generateText.mock.calls[0][0]).toContain("Media & Advertising");
+    expect(generateText.mock.calls[0][0]).not.toMatch(/media_advertising|technology_saas/);
+  });
+
+  it("ignores a category that is not one of the built-in industries", async () => {
+    reply({ role: "Marketer", industry: "Advertising", focusAreas: ["DOOH"], region: null, audience: null, question: null, category: "space_mining" });
+    expect((await understandFocus({ focusDescription: focus }, scope)).category).toBeNull();
   });
 
   it("asks the model's follow-up question when the focus is vague, with at most four answers", async () => {

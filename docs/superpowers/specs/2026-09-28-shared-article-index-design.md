@@ -88,8 +88,9 @@ RLS policy; `tsp_app` gets SELECT/INSERT/UPDATE (and DELETE on the pool for rete
   organisations or people mention a watched term (whole words, at most 150 per file), stores
   them as pool stories with no body (the crawler reads them like any other) and notes their
   sites for discovery. `GDELT_ENABLED=false` switches it off. About 10–30 MB per cycle.
-- Refresh: stories the crawler found unreadable are left out before scoring; with
-  `INDEX_ONLY_THRESHOLD` (default 40) index candidates, the search engines are not asked.
+- Refresh: with `INDEX_ONLY_THRESHOLD` (default 40) index candidates, the search engines are
+  not asked. (Stories the crawler found unreadable used to be left out; since 2026-11-25 they
+  are offered and written from their headlines; see the Discover Phase 1 spec.)
 
 ## Stage 3: push and health (built 2026-09-29)
 

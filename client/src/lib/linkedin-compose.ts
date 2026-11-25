@@ -1,6 +1,8 @@
 import { ApiError, apiRequest } from "@/lib/queryClient";
 import { capturePublishingConsent } from "@shared/publishing-consent";
 import type { Draft } from "@shared/schema";
+import type { TopicShape } from "@shared/topic-stories";
+import type { ToneValue } from "@shared/editorial";
 
 /** LinkedIn-only composer contract. Server publishing policy remains authoritative for every action. */
 export const LINKEDIN_CHARACTER_LIMIT = 3000;
@@ -9,7 +11,7 @@ export const DEFAULT_UNDO_SECONDS = 10;
 const UNDO_KEY = "tsp:post-undo-seconds";
 
 export type SavedDraft = Pick<Draft, "id" | "content"> & { updatedAt: string | null };
-type DraftTone = "professional" | "authoritative" | "contrarian" | "ai-recommended";
+type DraftTone = ToneValue;
 export interface PublishResult { jobIds?: string[]; results?: Array<{ platform: string; status: string }>; status?: string; message?: string }
 
 export function readUndoSeconds(): number {
@@ -99,13 +101,32 @@ export function scheduleLabel(date: Date, locale?: string): string {
 }
 
 export interface ComposeSource { id: string; headline: string; source: string; articleUrl: string }
+/** A topic search the compose writes from: the server's brief id and the stories the person ticked. */
+export interface ComposeTopic { topic: string; briefId: string; storyIds: string[]; storiesFound: number }
 
-/** One LinkedIn post, no platform adaptation stage. Manual ideas need enough substance to write from. */
-export function generationRequest(input: { source?: ComposeSource; angle: string; take: string; toneKey: string }):
+/**
+ * One LinkedIn post, no platform adaptation stage. A story, the ticked stories of a topic search, or,
+ * when the search found nothing, the person's own view as an opinion post. A bare idea still needs
+ * enough substance to write from.
+ */
+export function generationRequest(input: { source?: ComposeSource; topic?: ComposeTopic; angle: string; take: string; toneKey: string; shape?: TopicShape }):
   { endpoint: string; body: Record<string, unknown> } | { error: string } {
   const context = [input.angle.trim() && `Angle: ${input.angle.trim()}`, input.take.trim() && `My take: ${input.take.trim()}`].filter(Boolean).join("\n");
   const common = { selectedPlatforms: ["linkedin"], tones: [input.toneKey], format: "short-post", ...(context ? { userContext: context.slice(0, 4000) } : {}) };
   if (input.source) return { endpoint: "/api/instant-review/selected", body: { ...common, url: input.source.articleUrl } };
+  if (input.topic) {
+    const title = input.topic.topic.trim().slice(0, 200);
+    if (input.topic.storyIds.length) {
+      return { endpoint: "/api/instant-review/manual", body: { ...common, title, content: "",
+        topicBrief: { id: input.topic.briefId, storyIds: input.topic.storyIds }, ...(input.shape && input.shape !== "post" ? { shape: input.shape } : {}) } };
+    }
+    const view = input.take.trim();
+    const content = `${title}\n\n${view}`;
+    if (!view || content.length < 20) {
+      return { error: input.topic.storiesFound ? "Tick at least one story, or add your view to write an opinion post." : "Pundit found no stories on this topic. Add your view in a sentence or two to write an opinion post." };
+    }
+    return { endpoint: "/api/instant-review/manual", body: { ...common, title, content: content.slice(0, 20_000), opinionOnly: true, sourceLabel: "Your view" } };
+  }
   const idea = [input.angle.trim(), input.take.trim()].filter(Boolean).join("\n\n");
   if (idea.length < 20) return { error: "Describe your idea in at least 20 characters, or start from a story." };
   return { endpoint: "/api/instant-review/manual", body: { ...common, title: (input.angle.trim() || "LinkedIn post").slice(0, 200), content: idea.slice(0, 20_000) } };

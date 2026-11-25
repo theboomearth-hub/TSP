@@ -2,19 +2,22 @@ import express from "express";
 import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { suggest, understand, agent, pass } = vi.hoisted(() => ({ suggest: vi.fn(), understand: vi.fn(), agent: vi.fn(), pass: (_req: unknown, _res: unknown, next: () => void) => next() }));
-vi.mock("../middlewares/requireDbUser", () => ({ requireDbUser: pass, authedOf: () => ({ tenant: { tenantId: "tenant-a", userId: "user-a" } }) }));
-vi.mock("../middlewares/requirePermission", () => ({ requirePermission: () => pass }));
+const { suggest, understand, agent, quick, permissions, pass } = vi.hoisted(() => ({
+  suggest: vi.fn(), understand: vi.fn(), agent: vi.fn(), quick: vi.fn(), permissions: [] as string[], pass: (_req: unknown, _res: unknown, next: () => void) => next(),
+}));
+vi.mock("../middlewares/requireDbUser", () => ({ requireDbUser: pass, authedOf: () => ({ tenant: { tenantId: "tenant-a", userId: "user-a" }, dbUser: { id: "user-a", industry: "technology_saas" } }) }));
+vi.mock("../middlewares/requirePermission", () => ({ requirePermission: (permission: string) => { permissions.push(permission); return pass; } }));
 vi.mock("../middlewares/rateLimit", () => ({ onboardingSuggestionRateLimit: pass }));
 vi.mock("../services/onboardingSuggestions", async original => ({ ...await original<typeof import("../services/onboardingSuggestions")>(), suggestOnboardingItems: suggest }));
 vi.mock("../services/onboardingUnderstanding", async original => ({ ...await original<typeof import("../services/onboardingUnderstanding")>(), understandFocus: understand }));
 vi.mock("../services/onboardingAgent", async original => ({ ...await original<typeof import("../services/onboardingAgent")>(), runOnboardingAgent: agent }));
+vi.mock("../services/onboardingQuickSetup", async original => ({ ...await original<typeof import("../services/onboardingQuickSetup")>(), runQuickSetup: quick }));
 import { AIGenerationError } from "../services/openRouter";
 import { registerOnboardingSuggestionRoutes } from "./onboarding-suggestions";
 
 const app = express(); app.use(express.json()); registerOnboardingSuggestionRoutes(app);
 const body = { step: "publications", focusDescription: "I lead marketing for programmatic DOOH in India.", searchEdition: "en-IN" };
-beforeEach(() => { suggest.mockReset(); understand.mockReset(); agent.mockReset(); });
+beforeEach(() => { suggest.mockReset(); understand.mockReset(); agent.mockReset(); quick.mockReset(); });
 
 describe("POST /api/onboarding/suggestions", () => {
   it("rejects an invalid request without doing any work", async () => {
@@ -100,6 +103,43 @@ describe("POST /api/onboarding/agent", () => {
   it("ends the stream with an error event when the run fails", async () => {
     agent.mockRejectedValue(new AIGenerationError("ai_unavailable"));
     const response = await stream(request(app).post("/api/onboarding/agent").send(run));
+    expect(events(response.body as string)).toEqual([{ type: "error", step: null, code: "ai_unavailable" }]);
+  });
+});
+
+describe("POST /api/onboarding/quick-setup", () => {
+  const focus = { focusDescription: "I lead marketing for programmatic DOOH in India.", searchEdition: "en-IN" };
+  const stream = (req: request.Test) => req.buffer(true).parse((res, done) => { let text = ""; res.setEncoding("utf8"); res.on("data", chunk => { text += chunk; }); res.on("end", () => done(null, text)); });
+  const events = (text: string) => text.split("\n\n").filter(Boolean).map(block => JSON.parse(block.replace(/^data: /, "")));
+
+  it("needs permission to generate and to write the profile, since it saves the setup", () => {
+    expect(permissions).toEqual(expect.arrayContaining(["generation:create:own", "profile:write:own"]));
+  });
+
+  it("rejects a focus too short to search without starting", async () => {
+    const response = await request(app).post("/api/onboarding/quick-setup").send({ focusDescription: "SRE" });
+    expect(response.status).toBe(400);
+    expect(quick).not.toHaveBeenCalled();
+  });
+
+  it("streams the run for the signed-in user, never cached", async () => {
+    quick.mockImplementation(async (_input: unknown, _actor: unknown, _signal: unknown, emit: (event: object) => void) => {
+      emit({ type: "progress", step: null, message: "Reading what you do…" });
+      emit({ type: "saved", setup: { focusDescription: focus.focusDescription, keywords: [] }, degraded: false });
+      emit({ type: "done" });
+    });
+    const response = await stream(request(app).post("/api/onboarding/quick-setup").send({ ...focus, skipQuestion: true }));
+    expect(response.status).toBe(200);
+    expect(response.headers["content-type"]).toMatch(/^text\/event-stream/);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(events(response.body as string).map(event => event.type)).toEqual(["progress", "saved", "done"]);
+    expect(quick).toHaveBeenCalledWith(expect.objectContaining({ skipQuestion: true, searchEdition: "en-IN" }),
+      { scope: { tenantId: "tenant-a", userId: "user-a" }, userId: "user-a", industry: "technology_saas" }, expect.any(AbortSignal), expect.any(Function));
+  });
+
+  it("ends the stream with an error event when the run fails", async () => {
+    quick.mockRejectedValue(new AIGenerationError("ai_unavailable"));
+    const response = await stream(request(app).post("/api/onboarding/quick-setup").send(focus));
     expect(events(response.body as string)).toEqual([{ type: "error", step: null, code: "ai_unavailable" }]);
   });
 });

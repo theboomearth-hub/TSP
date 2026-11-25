@@ -26,7 +26,7 @@ export const PRODUCT_AREAS: ProductArea[] = [
   { key: "create", label: "Create",
     title: "A LinkedIn post in your voice",
     body: "Turn any story, link or idea into a thoughtful LinkedIn post, in the tone that sounds like you.",
-    points: [`${TONES.length} tones: ${TONES.join(", ")}`, "Claims checked against the source article", "Edit freely before anything goes out"] },
+    points: [`${TONES.length} tones, from ${TONES[0]} to ${TONES.at(-1)}`, "Claims checked against the source article", "Edit freely before anything goes out"] },
   { key: "content", label: "Content",
     title: "Plan your LinkedIn posts",
     body: "Drafts wait in one place until you're happy. Connect LinkedIn, then publish or schedule only after you approve each post.",

@@ -17,21 +17,23 @@ export type AppTourVariant = "classic" | "inbox";
 export const APP_TOUR_STEPS = [
   {
     title: "Start by talking to Pundit",
-    description: "Tell Pundit what you do and who you want to reach, then press Send. You can keep using the app while this guide is open, or select Next to keep exploring.",
+    description: "Tell Pundit what you do and who you want to reach, then send it. You can keep using the app while this guide is open, or select Next to keep exploring.",
     path: "/onboarding",
-    targets: ['[aria-label="Message Pundit"]'],
+    // The whole one-click form, so the guide opens below its examples and Set me up, not over them.
+    // The step-by-step workspace has no such form and falls back to its message box.
+    targets: ['[data-app-tour="setup-ask"]', '[aria-label="Message Pundit"]'],
   },
   {
     title: "Check what Pundit understood",
-    description: "Wait for Pundit's reply, answer any clarification and review the summary. Choose Build my setup, or Set up manually. Errors stay visible in the conversation; the tour waits for your choice.",
+    description: "Pundit replies with what it understood and builds your setup from today's news. Answer its question if it asks one. If you chose to pick everything yourself, choose Build my setup or Set up manually. Errors stay visible; the tour waits for Pundit to start.",
     path: "/onboarding",
     targets: ['[data-app-tour="setup-build"]', '[aria-label="Message Pundit"]'],
   },
   {
     title: "Review your curated setup",
-    description: "Review the suggested sources, topics, people and companies, or add your own. Choose at least one topic, company or person, then press Start my workspace. This step only completes after the server confirms your setup was saved.",
+    description: "Pundit saves the sources, topics, people and companies it found and shows what it set up; you can change them later in Settings. If you're picking them yourself, choose at least one topic, company or person, then press Start my workspace. This step only completes after the server confirms your setup was saved.",
     path: "/onboarding",
-    targets: ['[data-testid="button-complete-onboarding"]', '[data-app-tour="setup-tab"]'],
+    targets: ['[data-app-tour="setup-result"]', '[data-testid="button-complete-onboarding"]', '[data-app-tour="setup-tab"]'],
   },
   {
     title: "Connect an account (optional)",
@@ -193,7 +195,7 @@ export const INBOX_TOUR_STEPS: readonly AppTourStep[] = [
   ...APP_TOUR_STEPS.slice(0, FIRST_WORKSPACE_STEP + 1),
   {
     title: "Find a story in your Inbox",
-    description: "Open a story and choose Draft my take, or press Compose to write from your own idea. The guide advances when the composer opens.",
+    description: "Open a story and choose Draft my take, or press Compose and type any topic: Pundit finds related stories to write from. The guide advances when the composer opens.",
     path: "/dashboard",
     targets: ['[data-testid^="button-generate-"]', '[data-testid="button-refresh-inbox"]', '[data-testid="button-inbox-compose"]',
       '[data-testid="button-inbox-compose-mobile"]'],
@@ -361,13 +363,6 @@ function writeProgress(config: TourVariantConfig, scope: string, progress: TourP
   }
 }
 
-/** Quick onboarding lands directly in the workspace; the tour remains available from Help/App tour. */
-export function dismissWorkspaceTours(scope: string) {
-  for (const config of [CLASSIC_TOUR, INBOX_TOUR]) {
-    writeProgress(config, scope, { step: 0, ready: false, dismissed: true, completed: false });
-  }
-}
-
 /**
  * Reads this variant's progress. A variant without progress of its own adopts the classic progress once
  * (onboarding always writes classic), so indices of different variants are never mixed.
@@ -380,6 +375,11 @@ function loadProgress(config: TourVariantConfig, scope: string): TourProgress | 
   const adopted = config.handoff(classic);
   writeProgress(config, scope, adopted);
   return adopted;
+}
+
+/** Whether this browser has tour progress for this user and workspace, in any layout. */
+function hasProgressHere(scope: string) {
+  return Object.values(TOUR_VARIANTS).some(variant => readProgress(variant, scope) !== null);
 }
 
 /** Dismissing or finishing the tour in one layout must not let the other layout reopen it. */
@@ -457,7 +457,10 @@ function VariantTourProvider({ children, scope, enabled, phase = "workspace", va
     progressRef.current = { ...saved, step: nextIndex, ready: saved?.step === nextIndex && saved.ready === true,
       dismissed: saved?.dismissed ?? false, completed: saved?.completed ?? false };
     const awaitingSetup = phase === "setup" && saved && saved.step >= FIRST_WORKSPACE_STEP;
-    const shouldStart = !awaitingSetup && (!saved || (!saved.dismissed && !saved.completed));
+    // Setup is done before the workspace mounts. With no tour progress in this browser at all (another device,
+    // or cleared storage), nobody is following the guide here: it waits for App tour instead of taking over the page.
+    const newHere = phase === "workspace" && !saved && !hasProgressHere(scope);
+    const shouldStart = !awaitingSetup && !newHere && (!saved || (!saved.dismissed && !saved.completed));
     setIsOpen(shouldStart);
     openRef.current = shouldStart;
     if (shouldStart && phase === "workspace") setLocation(config.path(nextIndex, saved?.draftId, saved?.outcome));
@@ -470,6 +473,15 @@ function VariantTourProvider({ children, scope, enabled, phase = "workspace", va
 
   const report = useCallback((event: TourEvent, savedDraftId?: string, result?: TourOutcome) => {
     const current = progressRef.current;
+    // Setup saved while the guide isn't open on its last setup step: it isn't being followed,
+    // so it must not pop up over the new workspace. App tour reopens it at the next step.
+    if (event === "setup-saved" && phase === "setup" && !(openRef.current && current.step === FIRST_WORKSPACE_STEP - 1)) {
+      persist({ ...current, step: Math.max(current.step, FIRST_WORKSPACE_STEP), ready: false, dismissed: true });
+      if (scope) shareDismissal(config, scope, false);
+      setIsOpen(false);
+      openRef.current = false;
+      return;
+    }
     if (!openRef.current || current.ready || config.stepEvents[current.step] !== event) return;
     if (current.step >= config.draftBindingFromStep && (!savedDraftId || (current.draftId && savedDraftId !== current.draftId))) return;
     if (event === "draft-saved" && !savedDraftId) return;
@@ -481,7 +493,7 @@ function VariantTourProvider({ children, scope, enabled, phase = "workspace", va
     setReady(true);
     setDraftId(next.draftId);
     setOutcome(next.outcome);
-  }, [persist, config]);
+  }, [persist, config, phase, scope]);
 
   const advance = useCallback(() => {
     const current = progressRef.current;

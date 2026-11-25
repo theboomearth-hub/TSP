@@ -9,6 +9,8 @@ vi.mock("./punditBrain", () => ({ generatePlatformReviewsDetailed: generate }));
 vi.mock("./urlFetcher", () => ({ fetchArticleFromUrl: fetcher }));
 vi.mock("./articlePool", () => ({ findPooledArticle: find }));
 vi.mock("./keywordSearch", () => ({ isGoogleNewsArticleUrl: () => false, resolveGoogleNewsArticleUrl: vi.fn() }));
+vi.mock("./topicStories", () => ({ topicStoryArticles: vi.fn() }));
+vi.mock("../repositories/topicBriefs", () => ({ getTopicBrief: vi.fn(), markTopicBriefUsed: vi.fn(), findTopicStory: vi.fn() }));
 import { executeEditorialRequest } from "./editorial-request";
 
 const body = "The National Pharmaceutical Pricing Authority capped stent prices for a third year. ".repeat(12);

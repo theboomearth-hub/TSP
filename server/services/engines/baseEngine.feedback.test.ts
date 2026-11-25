@@ -12,7 +12,7 @@ vi.mock("../../repositories/inboxFeedback", () => ({ inboxFeedbackRepository: { 
 vi.mock("../publicationSources", () => ({ resolvePublicationSources: async () => [] }));
 vi.mock("../keywordSearch", () => ({ fetchArticlesForQuery: vi.fn().mockResolvedValue([]), isGoogleNewsArticleUrl: () => false, resolveGoogleNewsArticleUrl: vi.fn() }));
 vi.mock("../bingNewsSearch", () => ({ fetchBingArticlesForQuery: async () => [] }));
-vi.mock("../articlePool", () => ({ queryArticlePool: async () => [], registerPublications: async () => 0, prefetchPooledBodies: async () => 0, knownUnreadableLinks: async () => [] }));
+vi.mock("../articlePool", () => ({ queryArticlePool: async () => [], registerPublications: async () => 0, prefetchPooledBodies: async () => 0 }));
 vi.mock("../indexDiscovery", () => ({ noteDiscoveredSites: async () => 0, noteWatchTerms: async () => undefined }));
 import { BaseIndustryEngine } from "./baseEngine";
 

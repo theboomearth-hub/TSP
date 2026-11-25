@@ -105,11 +105,14 @@ live-acceptance run passed for that exact commit; an acceptance run from another
 commit cannot authorize the release.
 
 The LinkedIn-first entry flow is intentionally short: sign in with LinkedIn,
-select or describe one focus, and create the workspace. Google is hidden from
-the auth UI; email remains an explicit recovery fallback. The quick-start
-endpoint completes registration and profile setup together, then enqueues the
-first feed refresh. Users can refine sources, topics, companies, and market
-from their workspace settings without repeating onboarding.
+tell Pundit in one sentence what you do and who you want to reach, and the
+workspace opens with your feed set up. Google is hidden from the auth UI; email
+remains an explicit recovery fallback. Registration completes on its own from
+the sign-up name; Pundit's quick setup (`POST /api/onboarding/quick-setup`)
+picks and saves sources, topics, people and companies, then the first feed
+refresh starts. Users can refine all of it from their workspace settings
+without repeating onboarding. `e2e/onboarding-live.spec.ts` covers this flow
+for an account that has not finished setup.
 
 The commands below remain the owner-operated fallback when GitHub environments
 or Workload Identity Federation are unavailable.

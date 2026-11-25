@@ -120,13 +120,14 @@ describe("bounded Google News search", () => {
     expect(decode).toHaveBeenCalledWith(wrapper);
   });
 
-  it("leaves out stories whose Google News link cannot be resolved", async () => {
+  it("keeps stories whose Google News link cannot be resolved, with the Google News link", async () => {
+    // Pundit writes about them from the headline and snippet; a later refresh tries the link again.
     const unresolved = "https://news.google.com/rss/articles/unresolvable?oc=5";
     const resolvable = "https://news.google.com/rss/articles/resolvable?oc=5";
-    crawl.mockResolvedValue({ text: rss(`<item><title>Hidden</title><link>${unresolved}</link></item><item><title>Kept</title><link>${resolvable}</link></item>${item("", 3)}`) });
+    crawl.mockResolvedValue({ text: rss(`<item><title>Kept too</title><link>${unresolved}</link></item><item><title>Kept</title><link>${resolvable}</link></item>${item("", 3)}`) });
     decode.mockImplementation(async (url: string) => url === resolvable ? "https://publisher.test/kept" : url);
     const result = await fetchArticlesForQuery("AI");
-    expect(result.map(article => [article.title, article.link])).toEqual([["Kept", "https://publisher.test/kept"], ["Story 3", "https://news.test/3"]]);
+    expect(result.map(article => [article.title, article.link])).toEqual([["Kept too", unresolved], ["Kept", "https://publisher.test/kept"], ["Story 3", "https://news.test/3"]]);
   });
 
   it("returns an empty result for a successfully parsed empty feed", async () => {
@@ -179,6 +180,12 @@ describe("news headlines for onboarding suggestions", () => {
     expect(url.searchParams.get("q")).toBe("programmatic DOOH when:30d");
     expect(url.searchParams.get("gl")).toBe("IN");
     expect(decode).not.toHaveBeenCalled(); expect(modernDecode).not.toHaveBeenCalled();
+  });
+
+  it("searches stories of any age when asked, for an older story's related coverage", async () => {
+    crawl.mockResolvedValue({ text: rss("") });
+    await fetchNewsHeadlines("DGTOOHL reports brand shift", "en-US", undefined, null);
+    expect(new URL(crawl.mock.calls[0][0]).searchParams.get("q")).toBe("DGTOOHL reports brand shift");
   });
 
   it("keeps items without a trustworthy website or Google News link but never invents one", async () => {

@@ -19,7 +19,7 @@ const { getEngine } = vi.hoisted(() => ({ getEngine: vi.fn() }));
 vi.mock("./services/engines", () => ({ engineRegistry: { getEngine } }));
 vi.mock("./services/metaEngine", () => ({ normalizeIndustryToSlug: () => "other" }));
 // The shared index and its discovery are covered by their own tests; this file tests the storage transaction.
-vi.mock("./services/articlePool", () => ({ queryArticlePool: async () => [], registerPublications: async () => 0, prefetchPooledBodies: async () => 0, knownUnreadableLinks: async () => [] }));
+vi.mock("./services/articlePool", () => ({ queryArticlePool: async () => [], registerPublications: async () => 0, prefetchPooledBodies: async () => 0 }));
 vi.mock("./services/indexDiscovery", () => ({ noteDiscoveredSites: async () => 0, noteWatchTerms: async () => undefined }));
 import { BaseIndustryEngine } from "./services/engines/baseEngine";
 import type { FetchedArticle } from "./services/engines/types";

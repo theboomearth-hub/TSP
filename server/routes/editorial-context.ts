@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { z } from "zod";
+import { TOPIC_SHAPES } from "@shared/topic-stories";
 import { EDITORIAL_TONES, supportsArticle } from "@shared/editorial";
 import { authedOf } from "../middlewares/requireDbUser";
 import { storage } from "../storage";
@@ -8,6 +9,8 @@ import type { EditorialOptions } from "../services/punditBrain";
 
 export const editorialPreferences = {
   format: z.enum(["short-post", "article"]).default("short-post"),
+  /** How a topic post is built; a plain post when absent. */
+  shape: z.enum(TOPIC_SHAPES).optional(),
   userContext: z.string().trim().max(4000).optional(),
   tones: z.array(z.enum(EDITORIAL_TONES)).min(1).max(EDITORIAL_TONES.length).optional(),
 };
@@ -35,7 +38,7 @@ export function editorialCancellation(req: Request, res: Response) {
 }
 
 /** Caller passes only validated preferences. Identity and saved voice never come from body. */
-export async function editorialContext(req: Request, preferences: Pick<EditorialOptions, "format" | "userContext">, signal: AbortSignal): Promise<EditorialOptions> {
+export async function editorialContext(req: Request, preferences: Pick<EditorialOptions, "format" | "userContext" | "shape">, signal: AbortSignal): Promise<EditorialOptions> {
   const scope = authedOf(req).tenant;
   const profile = await storage.getUserProfile(scope);
   signal.throwIfAborted();
@@ -43,5 +46,6 @@ export async function editorialContext(req: Request, preferences: Pick<Editorial
     defaultTone: profile.defaultTone?.slice(0, 100),
     professionalFocus: profile.focusDescription?.slice(0, 500),
   }) : undefined;
-  return { scope: { tenantId: scope.tenantId }, voiceScope: { tenantId: scope.tenantId, userId: scope.userId }, voice, format: preferences.format, userContext: preferences.userContext, signal };
+  return { scope: { tenantId: scope.tenantId }, voiceScope: { tenantId: scope.tenantId, userId: scope.userId }, voice, format: preferences.format, userContext: preferences.userContext,
+    ...(preferences.shape ? { shape: preferences.shape } : {}), signal };
 }

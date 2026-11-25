@@ -148,6 +148,7 @@ describe("the database enforces isolation without help from the query", () => {
       "social_analytics",
       "social_oauth_states",
       "subscriptions",
+      "topic_briefs",
       "topic_idea_states",
       "user_notes",
       "user_profiles",

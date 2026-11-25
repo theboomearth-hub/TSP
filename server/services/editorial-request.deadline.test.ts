@@ -10,6 +10,8 @@ vi.mock("./punditBrain", () => ({ generatePlatformReviewsDetailed: generate, gen
 vi.mock("./urlFetcher", () => ({ fetchArticleFromUrl: fetcher }));
 vi.mock("./articlePool", () => ({ findPooledArticle: find }));
 vi.mock("./keywordSearch", () => ({ isGoogleNewsArticleUrl: () => false, resolveGoogleNewsArticleUrl: vi.fn() }));
+vi.mock("./topicStories", () => ({ topicStoryArticles: vi.fn() }));
+vi.mock("../repositories/topicBriefs", () => ({ getTopicBrief: vi.fn(), markTopicBriefUsed: vi.fn(), findTopicStory: vi.fn() }));
 import { executeEditorialRequest, prepareEditorialRequest, type EditorialExecutionContext, type PreparedEditorialRequest } from "./editorial-request";
 import { buildEvidenceBrief, MAX_SOURCE_PASSAGES } from "./editorialEvidence";
 import { CrawlError } from "./crawlerFetch";

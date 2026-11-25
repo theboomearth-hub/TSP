@@ -17,13 +17,24 @@ export interface TenantEntitlements {
 // tier: every Pro billing interval and currency grants the same Pro access.
 const PRO = { canPublish: true, canSchedule: true, canUseAnalytics: true, maxDailyGenerations: null };
 const TIERS: Record<string, Pick<TenantEntitlements, "canPublish" | "canSchedule" | "canUseAnalytics" | "maxDailyGenerations">> = {
-  free: { canPublish: false, canSchedule: false, canUseAnalytics: false, maxDailyGenerations: 3 },
+  free: { canPublish: false, canSchedule: false, canUseAnalytics: false, maxDailyGenerations: null },
   pro_monthly: PRO,
   pro_yearly: PRO,
   pro_monthly_inr: PRO,
   pro_yearly_inr: PRO,
 };
 const denied = { canPublish: false, canSchedule: false, canUseAnalytics: false, maxDailyGenerations: 0 };
+
+/**
+ * Free workspaces' daily drafts. Unlimited (decided 2026-11-25: no cap for now) unless
+ * FREE_DAILY_GENERATIONS is a positive whole number, which brings a cap back without a code change.
+ */
+export function freeDailyGenerations(env: NodeJS.ProcessEnv = process.env): number | null {
+  const raw = env.FREE_DAILY_GENERATIONS?.trim();
+  if (!raw || !/^\d+$/.test(raw)) return null;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value > 0 ? value : null;
+}
 
 export function subscriptionIsActive(status: string | null | undefined, currentPeriodEnd?: Date | null, now = new Date(), currentPeriodStart?: Date | null): boolean {
   return status === "active" && !!currentPeriodEnd && currentPeriodEnd.getTime() > now.getTime()
@@ -37,6 +48,7 @@ export function resolveTenantEntitlements(plans: BillingPlan[], rows: Subscripti
   // PLAN_LIMITS_ENABLED=false gives Free accounts Pro access (a temporary, all-access period).
   // A missing or inactive catalog still denies access.
   if (limits === TIERS.free && process.env.PLAN_LIMITS_ENABLED === "false") limits = PRO;
+  else if (limits === TIERS.free) limits = { ...TIERS.free, maxDailyGenerations: freeDailyGenerations() };
   return {
     planKey: plan?.key ?? "unavailable", planName: plan?.name ?? "Unavailable",
     status: current?.status ?? (plan ? "free" : "unavailable"),

@@ -132,15 +132,6 @@ export async function findPooledArticle(url: string): Promise<PooledStory | null
     inputKind: row.inputKind === "page_body" ? "page_body" : "feed_excerpt", readable: row.readable, publishedAt: row.publishedAt };
 }
 
-/** Of these links, the ones whose page the crawler already found unreadable (canonical form). */
-export async function knownUnreadableLinks(urls: readonly string[]): Promise<string[]> {
-  const canonical = [...new Set(urls.map(url => canonicalHttpUrl(url)).filter((url): url is string => Boolean(url)))].slice(0, 600);
-  if (!canonical.length) return [];
-  const rows = await db.select({ canonicalUrl: pooledArticles.canonicalUrl }).from(pooledArticles)
-    .where(and(eq(pooledArticles.readable, false), inArray(pooledArticles.canonicalUrl, canonical)));
-  return rows.map(row => row.canonicalUrl);
-}
-
 /** Records the outcome of fetching a story's page. A readable body replaces the feed excerpt. */
 export async function markPooledBody(url: string, outcome: { readable: boolean; content?: string; title?: string }): Promise<void> {
   const canonicalUrl = canonicalHttpUrl(url);

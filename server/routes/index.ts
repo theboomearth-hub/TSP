@@ -33,6 +33,7 @@ import { registerCreationSessionRoutes } from "./creation-session";
 import { registerFeatureRoutes } from "./features";
 import { registerNotesRoutes } from "./notes";
 import { registerNewsSearchRoutes } from "./news-search";
+import { registerTopicRoutes } from "./topics";
 import { registerStrategyRoutes } from "./strategy";
 import { registerInboxFeedbackRoutes } from "./inbox-feedback";
 import { registerMomentsRoutes } from "./moments";
@@ -80,6 +81,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerTeamRoutes(app);
   registerNotesRoutes(app);
   registerNewsSearchRoutes(app);
+  registerTopicRoutes(app);
   registerStrategyRoutes(app);
   registerInboxFeedbackRoutes(app);
   registerMomentsRoutes(app);

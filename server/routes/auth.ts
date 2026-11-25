@@ -12,8 +12,9 @@ import { z } from "zod";
 const completeRegistrationSchema = z.object({
   firstName: z.string().min(1).max(50),
   lastName: z.string().min(1).max(50),
-  countries: z.array(z.string().min(1).max(100)).min(1).max(10),
-  industries: z.array(z.string().min(1).max(100)).min(1).max(10),
+  // Optional: onboarding infers the industry and region from what the user says they do.
+  countries: z.array(z.string().min(1).max(100)).max(10).default([]),
+  industries: z.array(z.string().min(1).max(100)).max(10).default([]),
   // The browser's IANA zone, e.g. "Asia/Kolkata". Optional, and never a reason to refuse sign-up.
   timeZone: z.string().max(100).optional().catch(undefined),
 });
@@ -46,6 +47,11 @@ export function registerAuthRoutes(app: Express) {
       // retaining every selection for future multi-industry ranking.
       const [country] = countries;
       const [industry] = industries;
+      // Left out, these keep any value the account already has.
+      const context = {
+        ...(country ? { country, countries } : {}),
+        ...(industry ? { industry, industries } : {}),
+      };
       
       // First check if user exists
       const [existingUser] = await db.select().from(users).where(eq(users.id, userId));
@@ -60,10 +66,7 @@ export function registerAuthRoutes(app: Express) {
         .set({
           firstName,
           lastName,
-          country,
-          industry,
-          countries,
-          industries,
+          ...context,
           registrationCompleted: new Date(),
           updatedAt: new Date(),
         })
@@ -76,7 +79,7 @@ export function registerAuthRoutes(app: Express) {
       
       // Send industry-customized welcome email
       if (updatedUser?.email) {
-        sendAppEmail({ type: "welcome", recipient: updatedUser.email, recipientName: firstName, userId: updatedUser.id, ...emailTemplates.welcome(industryDisplayName(industry)), dedupeKey: `welcome:${updatedUser.id}` }).catch((err) => console.error("Failed to send welcome email:", err));
+        sendAppEmail({ type: "welcome", recipient: updatedUser.email, recipientName: firstName, userId: updatedUser.id, ...emailTemplates.welcome(industryDisplayName(updatedUser.industry)), dedupeKey: `welcome:${updatedUser.id}` }).catch((err) => console.error("Failed to send welcome email:", err));
       }
       
       res.json(toSafeUser(updatedUser));

@@ -134,14 +134,24 @@ describe("resolveGate", () => {
       ).toBe("loading");
     });
 
-    it("routes to onboarding when the profile is not yet completed", () => {
-      expect(
-        resolveGate(input({ profile: { status: "ok", onboardingStatus: "pending" } })),
-      ).toBe("onboarding");
+    it("shows setup on the app's own pages while it is unfinished: one place, not a separate page", () => {
+      const pending = { profile: { status: "ok" as const, onboardingStatus: "pending" } };
+      expect(resolveGate(input(pending))).toBe("onboarding");
+      expect(resolveGate(input({ ...pending, path: "/dashboard/create" }))).toBe("onboarding");
+      expect(resolveGate(input({ ...pending, path: "/admin" }))).toBe("onboarding");
     });
 
-    it("honours an explicit /onboarding visit even once complete", () => {
-      expect(resolveGate(input({ path: "/onboarding" }))).toBe("onboarding");
+    it("keeps the setup result on the page where it was saved, and opens the app anywhere else", () => {
+      expect(resolveGate(input({ setupResultPath: "/dashboard" }))).toBe("onboarding");
+      expect(resolveGate(input({ setupResultPath: "/dashboard", path: "/dashboard/settings" }))).toBe("dashboard");
+      expect(resolveGate(input({ setupResultPath: null }))).toBe("dashboard");
+    });
+
+    it("treats /onboarding as an old link to the dashboard", () => {
+      expect(resolveGate(input({ path: "/onboarding" }))).toBe("redirect-dashboard");
+      expect(resolveGate(input({ path: "/onboarding", profile: { status: "ok", onboardingStatus: "pending" } }))).toBe("redirect-dashboard");
+      // Registration still comes first.
+      expect(resolveGate(input({ path: "/onboarding", me: { status: "ok", registrationCompleted: null } }))).toBe("register");
     });
   });
 });

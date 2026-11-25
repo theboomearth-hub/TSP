@@ -12,7 +12,7 @@ const { storage, crawl, network, resolveSources, bing, index, discovery } = vi.h
   storage: { beginInboxRefresh: vi.fn(), commitInboxRefresh: vi.fn(), reserveSearchQueryPlan: vi.fn(), getUserSources: vi.fn(), updateUserSource: vi.fn(), getInboxItemByUrl: vi.fn(), createInboxItem: vi.fn() },
   crawl: vi.fn(), network: vi.fn(() => { throw new Error("Unexpected network request"); }), resolveSources: vi.fn(),
   bing: vi.fn(),
-  index: { query: vi.fn(), register: vi.fn(), prefetch: vi.fn(), unreadable: vi.fn() },
+  index: { query: vi.fn(), register: vi.fn(), prefetch: vi.fn() },
   discovery: { sites: vi.fn(), terms: vi.fn() },
 }));
 vi.mock("../../storage", () => ({ storage }));
@@ -23,7 +23,7 @@ vi.mock("node-fetch", () => ({ default: network }));
 // Bing is its own provider (see bingNewsSearch.test.ts); here it finds nothing unless a test says so.
 vi.mock("../bingNewsSearch", () => ({ fetchBingArticlesForQuery: bing }));
 // The shared article index (see articlePool.storage.test.ts); empty unless a test says so.
-vi.mock("../articlePool", () => ({ queryArticlePool: index.query, registerPublications: index.register, prefetchPooledBodies: index.prefetch, knownUnreadableLinks: index.unreadable }));
+vi.mock("../articlePool", () => ({ queryArticlePool: index.query, registerPublications: index.register, prefetchPooledBodies: index.prefetch }));
 vi.mock("../indexDiscovery", () => ({ noteDiscoveredSites: discovery.sites, noteWatchTerms: discovery.terms }));
 
 // Real engine, provider, parser, planner and article cache; only storage and
@@ -82,7 +82,7 @@ beforeEach(() => {
   storage.createInboxItem.mockResolvedValue({ id: "inbox-item" });
   crawl.mockImplementation(async url => response(url));
   bing.mockResolvedValue([]);
-  index.query.mockResolvedValue([]); index.register.mockResolvedValue(0); index.prefetch.mockResolvedValue(0); index.unreadable.mockResolvedValue([]);
+  index.query.mockResolvedValue([]); index.register.mockResolvedValue(0); index.prefetch.mockResolvedValue(0);
   discovery.sites.mockResolvedValue(0); discovery.terms.mockResolvedValue(undefined);
 });
 afterEach(() => {
@@ -524,9 +524,8 @@ describe("shared article index", () => {
     save({ keywords: ["Current"] });
     storage.createInboxItem.mockImplementation(async (_scope: TenantScope, item: Record<string, unknown>) => ({ id: "inbox-item", ...item }));
     await (await makeEngine()).processForUser(scope, profile());
-    // Once before offering (the read check), once after the commit for whatever was accepted.
-    expect(index.prefetch).toHaveBeenCalledTimes(2);
-    expect(index.prefetch).toHaveBeenLastCalledWith(
+    // Only after the commit, for whatever was accepted; nothing is read before offering.
+    expect(index.prefetch).toHaveBeenCalledExactlyOnceWith(
       [expect.objectContaining({ link: "https://news.test/US%3Aen%3ACurrent", title: "Current", source: "Publisher" })],
       expect.objectContaining({ limit: 10 }));
   });
@@ -545,36 +544,34 @@ describe("shared index discovery", () => {
     expect(discovery.terms).toHaveBeenCalledExactlyOnceWith(profiles.get(scopeKey(scope)));
   });
 
-  it("leaves out stories the crawler has found unreadable", async () => {
+  it("offers stories whose page can't be read, without reading pages before offering them", async () => {
+    // Pundit writes about a paywalled or blocked story from its headline and snippet.
     save({ keywords: ["Current"] });
-    index.unreadable.mockResolvedValue(["https://news.test/US%3Aen%3ACurrent"]);
-    const result = await (await makeEngine()).processForUser(scope, profile());
-    expect(index.unreadable).toHaveBeenCalledWith(["https://news.test/US%3Aen%3ACurrent"]);
-    expect(result).toMatchObject({ success: true, articlesProcessed: 0, newInboxItems: 0 });
-    expect(storage.createInboxItem).not.toHaveBeenCalled();
-  });
-
-  it("reads the top stories before offering them, and offers only the ones it can write from", async () => {
-    // Production: 6 of a new account's 10 stories were pages the crawler couldn't read (blocked,
-    // paywalled, JavaScript-only), found seconds after they were offered.
-    save({ keywords: ["Current"] });
+    storage.createInboxItem.mockImplementation(async (_scope: TenantScope, item: Record<string, unknown>) => ({ id: `item-${String(item.articleUrl)}`, ...item }));
     index.query.mockResolvedValue([indexed("Current, blocked", "https://blocked.test/current"), indexed("Current, readable", "https://open.test/current")]);
-    // Before reading nothing is known; after reading, the blocked page is.
-    index.unreadable.mockResolvedValueOnce([]).mockResolvedValue(["https://blocked.test/current"]);
     const result = await (await makeEngine()).processForUser(scope, profile());
-    const [stories, options] = index.prefetch.mock.calls[0];
-    expect(stories.map((story: { link: string }) => story.link).sort()).toEqual(["https://blocked.test/current", "https://news.test/US%3Aen%3ACurrent", "https://open.test/current"]);
-    expect(options).toMatchObject({ limit: 24, concurrency: 6, signal: expect.any(AbortSignal) });
     const saved = storage.createInboxItem.mock.calls.map(([, item]) => item.articleUrl);
-    expect(saved).toContain("https://open.test/current");
-    expect(saved).not.toContain("https://blocked.test/current");
-    expect(result).toMatchObject({ success: true, newInboxItems: 2 });
+    expect(saved).toEqual(expect.arrayContaining(["https://blocked.test/current", "https://open.test/current"]));
+    expect(result).toMatchObject({ success: true, newInboxItems: 3 });
+    // Only the accepted stories are read, after they are offered.
+    expect(index.prefetch).toHaveBeenCalledTimes(1);
+    expect(index.prefetch.mock.calls[0][1]).toMatchObject({ limit: 10 });
   });
 
-  it("still offers stories when the read check itself fails", async () => {
+  it("offers a story whose Google News link couldn't be converted, but never reads that link", async () => {
+    save({ keywords: ["Current"] });
+    const wrapper = "https://news.google.com/rss/articles/opaque-current?oc=5";
+    storage.createInboxItem.mockImplementation(async (_scope: TenantScope, item: Record<string, unknown>) => ({ id: `item-${String(item.articleUrl)}`, ...item }));
+    index.query.mockResolvedValue([indexed("Current, behind Google News", wrapper)]);
+    await (await makeEngine()).processForUser(scope, profile());
+    expect(storage.createInboxItem.mock.calls.map(([, item]) => item.articleUrl)).toContain(wrapper);
+    const read = index.prefetch.mock.calls.flatMap(([stories]) => stories.map((story: { link: string }) => story.link));
+    expect(read).not.toContain(wrapper);
+  });
+
+  it("still offers stories when reading them into the index fails", async () => {
     save({ keywords: ["Current"] });
     index.prefetch.mockRejectedValue(new Error("pool down"));
-    index.unreadable.mockResolvedValueOnce([]).mockRejectedValue(new Error("pool down"));
     const result = await (await makeEngine()).processForUser(scope, profile());
     expect(result).toMatchObject({ success: true, newInboxItems: 1 });
   });

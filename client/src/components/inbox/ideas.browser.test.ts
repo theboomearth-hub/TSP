@@ -85,6 +85,9 @@ beforeAll(async () => {
         if (parsed.pathname === "/api/plan") return json(buildPlan({ now: new Date(), days: Number(parsed.searchParams.get("days")), timeZone: "UTC", strategy: currentStrategy(), fallbackTime: "09:00",
           hasStrategy: Boolean(db().strategy), scheduled: db().scheduled, ideas: ranked(200), states: extraStates() }));
         if (url.startsWith("/api/moments")) return db().moments ? json(db().moments) : json({ message: "Not found" }, 404);
+        // Compose looks up recent topics, and stories for an idea's topic (none here).
+        if (url === "/api/topics/recent") return json({ topics: [] });
+        if (method === "POST" && url === "/api/topics/related") { window.__topicSearches = [...(window.__topicSearches ?? []), body.topic]; return json({ briefId: "5d2c4b7e-1f0a-4c6b-9a8e-2b3c4d5e6f70", topic: body.topic, searchedFor: body.topic, stories: [], expiresAt: new Date(Date.now() + 86400000).toISOString() }); }
         // Other phases' optional endpoints: absent here, like before they ship.
         if (url === "/api/watch-alerts" && method === "GET") return json([]);
         if (/^\\/api\\/(searches|feed-preferences|inputs)/.test(url)) return json({ message: "Not found" }, 404);
@@ -170,7 +173,10 @@ describe("Topic discovery: strategy, ideas, check-in and plan", () => {
     await page.getByTestId("button-draft-idea").click();
     const compose = page.getByTestId("compose-float");
     await browserExpect(compose).toBeVisible();
-    await browserExpect(compose.getByLabel("Angle")).toHaveValue("Name a common belief about Retail media and show what you see in practice.");
+    await browserExpect(compose.getByLabel("Angle", { exact: true })).toHaveValue("Name a common belief about Retail media and show what you see in practice.");
+    // The idea's pillar is the topic: Compose looks up related stories for it straight away.
+    await browserExpect(compose.getByRole("textbox", { name: "Topic" })).toHaveValue("Retail media");
+    await expect.poll(() => page.evaluate(() => (window as any).__topicSearches)).toEqual(["Retail media"]);
     await expect.poll(async () => (await calls("PATCH", new RegExp(`^/api/ideas/${MYTH}$`))).map(call => call.body))
       .toMatchObject([{ state: "used", idea: { id: MYTH, title: "Myth vs reality: Retail media" } }]);
     await browserExpect(page.getByTestId(`row-idea-${MYTH}`)).toContainText("Drafted");

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { PgDialect } from "drizzle-orm/pg-core";
 import type { SQL } from "drizzle-orm";
 const mocks = vi.hoisted(() => ({ tenantBilling: vi.fn(), readEntitlementState: vi.fn() }));
@@ -11,6 +11,11 @@ import { resolveTenantEntitlements } from "./entitlements";
 import { AIGenerationError } from "./openRouter";
 import { CrawlError } from "./crawlerFetch";
 import type { BillingPlan, Subscription } from "@shared/schema";
+
+// Free drafts are unlimited by default; these tests cover the cap that FREE_DAILY_GENERATIONS brings back.
+const originalFreeCap = process.env.FREE_DAILY_GENERATIONS;
+beforeAll(() => { process.env.FREE_DAILY_GENERATIONS = "3"; });
+afterAll(() => { if (originalFreeCap === undefined) delete process.env.FREE_DAILY_GENERATIONS; else process.env.FREE_DAILY_GENERATIONS = originalFreeCap; });
 
 // Transactional double, NOT PostgreSQL lock/RLS proof. Real DB tests are opt-in.
 type Row = Record<string, any>;

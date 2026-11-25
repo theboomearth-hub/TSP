@@ -12,8 +12,33 @@ export type SourceFailure = z.infer<typeof sourceFailureSchema>;
 export const ARTICLE_PLATFORMS = ["linkedin", "medium", "reddit", "devto", "hashnode", "quora", "wechat", "naver"] as const;
 export type EditorialFormat = "short-post" | "article";
 /** Writer tone keys; a request may ask for any subset. */
-export const EDITORIAL_TONES = ["thoughtLeader", "industryInsider", "provocateur", "dataDriven"] as const;
+export const EDITORIAL_TONES = [
+  "thoughtLeader", "industryInsider", "provocateur", "dataDriven",
+  "storyteller", "educator", "conversational", "executiveBrief", "balancedAnalyst", "optimist", "witty",
+] as const;
 export type EditorialTone = typeof EDITORIAL_TONES[number];
+/** Written when a request names no tone: the original four, so older callers keep their cost and output. */
+export const CLASSIC_EDITORIAL_TONES: readonly EditorialTone[] = ["thoughtLeader", "industryInsider", "provocateur", "dataDriven"];
+
+/**
+ * Each tone's stored name (drafts and the profile's default tone) and its label. The original four keep
+ * the names they were stored under before they had labels.
+ */
+export const TONE_CATALOG = [
+  { key: "thoughtLeader", value: "professional", label: "Thought Leader" },
+  { key: "industryInsider", value: "authoritative", label: "Industry Insider" },
+  { key: "provocateur", value: "contrarian", label: "Provocateur" },
+  { key: "dataDriven", value: "ai-recommended", label: "Data-Driven" },
+  { key: "storyteller", value: "storyteller", label: "Storyteller" },
+  { key: "educator", value: "educator", label: "Educator" },
+  { key: "conversational", value: "conversational", label: "Conversational" },
+  { key: "executiveBrief", value: "executive-brief", label: "Executive Brief" },
+  { key: "balancedAnalyst", value: "balanced", label: "Balanced Analyst" },
+  { key: "optimist", value: "optimist", label: "Optimist" },
+  { key: "witty", value: "witty", label: "Witty" },
+] as const satisfies ReadonlyArray<{ key: EditorialTone; value: string; label: string }>;
+export type ToneValue = typeof TONE_CATALOG[number]["value"];
+export const TONE_VALUES = TONE_CATALOG.map(tone => tone.value) as [ToneValue, ...ToneValue[]];
 /** Persistence/application cap in raw UTF-16 code units, NOT a platform count. */
 export const MAX_DRAFT_CHARACTERS = 5000;
 /** X shortens every link to a 23-character t.co URL, so that is what counts toward 280. */

@@ -111,6 +111,7 @@ afterAll(async () => {
 
 describe("inbox app tour", () => {
   it("completes Find a story when a child reports the composer opened, storing progress under its own key", async () => {
+    await page.getByRole("button", { name: "Reopen tour" }).click();
     await assertStep("Connect an account (optional)");
     await page.getByRole("button", { name: "Continue without connecting" }).click();
     await nextStep();
@@ -194,7 +195,8 @@ describe("inbox app tour", () => {
 
   it("does not auto-open when the classic tour was dismissed, and resumes at Find a story", async () => {
     await reloadWith({ [CLASSIC_KEY]: { step: 8, draftId: "draft-x", dismissed: true, completed: false } });
-    await browserExpect(page.getByTestId("route")).toHaveText("/dashboard/settings?tab=integrations");
+    // The page stays where it was opened.
+    await browserExpect(page.getByTestId("route")).toHaveText("/");
     await browserExpect(page.getByTestId("dialog-app-tour")).toHaveCount(0);
     expect(await storedProgress(INBOX_KEY)).toEqual({ step: 4, ready: false, dismissed: true, completed: false });
     await page.getByRole("button", { name: "Reopen tour" }).click();

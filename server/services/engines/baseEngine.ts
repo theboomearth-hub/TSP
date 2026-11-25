@@ -3,7 +3,7 @@ import { resolvePublicationSources } from "../publicationSources.js";
 import { CrawlError, crawlErrorMessage, fetchPublicText, mapCrawlSettled } from "../crawlerFetch.js";
 import { fetchArticlesForQuery, isGoogleNewsArticleUrl, resolveGoogleNewsArticleUrl } from "../keywordSearch.js";
 import { fetchBingArticlesForQuery } from "../bingNewsSearch.js";
-import { knownUnreadableLinks, prefetchPooledBodies, queryArticlePool, registerPublications } from "../articlePool.js";
+import { prefetchPooledBodies, queryArticlePool, registerPublications } from "../articlePool.js";
 import { noteDiscoveredSites, noteWatchTerms } from "../indexDiscovery.js";
 import { parseFeedContent } from "../universalFeedParser.js";
 import { scrapeWebpageArticles } from "../webpageScraper.js";
@@ -40,10 +40,6 @@ const INDEX_WINDOW_DAYS = 30;
 const INDEX_CANDIDATE_LIMIT = 150;
 const INDEX_PREFETCH_LIMIT = 10;
 const INDEX_PREFETCH_BUDGET_MS = 15000;
-// Before offering stories, read the top ones not read yet, so Discover offers what can be written from.
-const READ_CHECK_LIMIT = 24;
-const READ_CHECK_CONCURRENCY = 6;
-const READ_CHECK_BUDGET_MS = 12000;
 // With this many index candidates the search engines are not asked at all (0 disables).
 const INDEX_ONLY_THRESHOLD = Number(process.env.INDEX_ONLY_THRESHOLD ?? "40");
 type SearchReservation = { queries: string[]; searchEdition: string; profile: UserProfile };
@@ -189,30 +185,11 @@ export abstract class BaseIndustryEngine implements IIndustryEngine {
     }, () => !partialFailure);
   }
 
-  /**
-   * Reads the top-ranked stories not read yet (bounded) and drops the ones that turn out to be
-   * blocked, paywalled or empty, so every story offered can be written from. Pages whose read is
-   * cut off stay in; a failed check keeps everything.
-   */
-  protected async offerOnlyReadable<T extends FetchedArticle>(ranked: T[]): Promise<T[]> {
-    const top = ranked.slice(0, READ_CHECK_LIMIT);
-    if (!top.length) return ranked;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), READ_CHECK_BUDGET_MS);
-    try {
-      await prefetchPooledBodies(top.map(article => ({ link: article.link, title: article.title, source: article.source, content: article.content,
-        publishedAt: article.publishedAt ?? article.pubDate, sourceOrigin: article.sourceOrigin })),
-        { limit: READ_CHECK_LIMIT, concurrency: READ_CHECK_CONCURRENCY, signal: controller.signal }).catch(() => undefined);
-    } finally {
-      clearTimeout(timer);
-    }
-    const unreadable = new Set(await knownUnreadableLinks(top.map(article => article.link)).catch(() => [] as string[]));
-    return unreadable.size ? ranked.filter(article => !unreadable.has(canonicalHttpUrl(article.link) ?? "")) : ranked;
-  }
-
   /** Reads the accepted stories' pages into the shared index now, bounded and best effort. */
   protected async prefetchAcceptedBodies(result: EngineRunResult): Promise<void> {
-    const stories = (result.items ?? []).filter(item => typeof item.articleUrl === "string" && item.articleUrl).slice(0, INDEX_PREFETCH_LIMIT)
+    // A Google News link has no article body to read and is not a publisher's story.
+    const stories = (result.items ?? []).filter(item => typeof item.articleUrl === "string" && item.articleUrl && !isGoogleNewsArticleUrl(item.articleUrl))
+      .slice(0, INDEX_PREFETCH_LIMIT)
       .map(item => ({ link: item.articleUrl, title: item.headline, source: item.source, content: item.summary ?? "", publishedAt: item.publishedAt }));
     if (!result.success || !stories.length) return;
     const controller = new AbortController();
@@ -327,11 +304,10 @@ export abstract class BaseIndustryEngine implements IIndustryEngine {
       // Completion timing must not choose the representative. Prefer source body,
       // then longer text, with a stable full-record tie break. Story grouping is
       // deferred until AFTER history exclusion inside commit.
-      // Pages the crawler already found unreadable (paywalls, blocks) are not offered again.
-      const unreadable = new Set(await knownUnreadableLinks([...userSourceArticles, ...keywordArticles, ...indexArticles].map(article => article.link)).catch(() => []));
-      // Video pages have no text to write from, however they label themselves.
+      // A page that can't be read (paywall, block) is still offered: Pundit writes about it from its
+      // headline and snippet. Video pages have no text at all, however they label themselves.
       const fetched = [...userSourceArticles, ...keywordArticles, ...indexArticles]
-        .filter(article => !unreadable.has(canonicalHttpUrl(article.link) ?? "") && !isVideoPageUrl(article.link)).sort((a, b) =>
+        .filter(article => !isVideoPageUrl(article.link)).sort((a, b) =>
         Number(b.inputKind === "page_body") - Number(a.inputKind === "page_body") || b.content.length - a.content.length ||
         (JSON.stringify(a) < JSON.stringify(b) ? -1 : JSON.stringify(a) > JSON.stringify(b) ? 1 : 0));
       for (const article of fetched) {
@@ -343,7 +319,7 @@ export abstract class BaseIndustryEngine implements IIndustryEngine {
       }
 
       const evaluatedAt = Date.now();
-      const scoredArticles = await this.offerOnlyReadable(await this.scoreArticles(articles, userProfile, evaluatedAt, learned.keywordAdjustments));
+      const scoredArticles = await this.scoreArticles(articles, userProfile, evaluatedAt, learned.keywordAdjustments);
       // Pass the bounded RANKED pool, not its top ten: historical matches must
       // not consume quota or hide fresh candidates further down the ranking.
       const result = await storage.commitInboxRefresh(scope, operationId, autoRefresh, begin.snapshot,

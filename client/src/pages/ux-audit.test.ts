@@ -118,30 +118,6 @@ async function say(text: string) {
 async function resolvePending() { await page.evaluate(() => (window as any).__pending.shift()()); }
 
 describe("UX audit screens (fully mocked Chromium)", () => {
-  it("starts a LinkedIn workspace from one setup screen and two clicks", async () => {
-    await mount("registration", [{ body: { profile: { onboardingStatus: "completed", userId: "fixture-user", tenantId: "fixture-tenant" } } }, { body: { jobId: "quick-refresh", status: "queued" } }]);
-    await page.getByTestId("preset-ai-saas").click();
-    await page.getByRole("combobox", { name: "Primary market" }).click();
-    await page.getByRole("option", { name: "India", exact: true }).click();
-    await page.getByRole("button", { name: "Create my LinkedIn workspace" }).click();
-    await browserExpect.poll(async () => (await calls()).find((call: any) => call.url === "/api/onboarding/quick-start")).toBeTruthy();
-    const quickStart = (await calls()).find((call: any) => call.url === "/api/onboarding/quick-start");
-    expect(quickStart).toMatchObject({
-      method: "POST",
-      body: {
-        industry: "technology_saas",
-        country: "India",
-      },
-    });
-    expect(quickStart?.body.keywords).toEqual(expect.arrayContaining([
-      { keyword: "Artificial Intelligence", weight: 1 },
-      { keyword: "Agentic AI", weight: 0.92 },
-      { keyword: "SaaS", weight: 0.84 },
-    ]));
-    expect(quickStart?.body.focusDescription).toContain("AI, SaaS");
-    await browserExpect.poll(() => page.evaluate(() => localStorage.getItem("tsp-app-tour:inbox-v1:fixture-user:fixture-tenant"))).toContain('"dismissed":true');
-  });
-
   it("requires a real focus and one topic, company or person before finishing, and can finish without the agent", async () => {
     await mount("wizard");
     await page.setViewportSize({ width: 1280, height: 900 });
@@ -231,7 +207,7 @@ describe("UX audit screens (fully mocked Chromium)", () => {
     await resolvePending();
     expect(await page.evaluate(() => (window as any).__toasts)).toEqual([]);
   });
-  it("keeps agent failure optional and does not claim registration is the last step", async () => {
+  it("keeps agent failure optional and finishes registration without a form", async () => {
     await mount("wizard", [{ status: 500, body: { message: "Fixture unavailable" } }]);
     await page.setViewportSize({ width: 1280, height: 900 });
     await say("Product strategy for small teams");
@@ -241,9 +217,14 @@ describe("UX audit screens (fully mocked Chromium)", () => {
     await page.getByTestId("button-add-keyword").click();
     await page.getByRole("button", { name: "Finish setup" }).click();
     expect(await page.evaluate(() => (window as any).__completed[0].publications)).toEqual([]);
+    // Registration asks nothing now: it finishes the account from the sign-up name and moves on.
     await page.evaluate(() => (window as any).__setSurface("registration"));
-    await browserExpect(page.getByRole("heading", { name: "What do you want to talk about?" })).toBeVisible();
-    await browserExpect(page.getByRole("button", { name: "Create my LinkedIn workspace" })).toBeDisabled();
+    const registrations = async () => (await calls()).filter((call: any) => call.url === "/api/complete-registration");
+    await browserExpect.poll(async () => (await registrations()).length).toBe(1);
+    const [registration] = await registrations();
+    expect(registration.body).toMatchObject({ firstName: "Taylor", lastName: "Lee" });
+    expect(registration.body).not.toHaveProperty("industries");
+    expect(registration.body).not.toHaveProperty("countries");
     expect(await page.getByText(/One last step/).count()).toBe(0);
   });
   it("on a phone, switches between Pundit and the setup with the composer at hand, without horizontal scroll", async () => {

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { skipFirstWorkspaceTour } from "./app-tour";
+import { expectNoTourOnNewDevice } from "./app-tour";
 
 const publicRoutes = [
   { path: "/", heading: /Turn industry news into LinkedIn influence/i },
@@ -89,7 +89,7 @@ test("authenticated workspace routes load without overflow", async ({ page }) =>
     throw new Error(`Candidate sign-in failed with HTTP ${signInResponse.status()}.`);
   }
   await expect(page).toHaveURL(url => url.origin === origin && (url.pathname === "/dashboard" || url.pathname.startsWith("/dashboard/")));
-  await skipFirstWorkspaceTour(page);
+  await expectNoTourOnNewDevice(page);
   const features = await (await page.request.get(`${origin}/api/features`)).json() as { linkedinInbox?: boolean };
   const inboxLayout = features.linkedinInbox === true;
 

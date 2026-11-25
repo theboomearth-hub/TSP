@@ -50,7 +50,7 @@ export function EditorialVoiceSettings() {
     <Button variant="outline" disabled={busy} onClick={() => void load()}>{open ? "Reload voice settings" : "Manage optional voice"}</Button>
     {error && <p role="alert" className="text-destructive">{error}</p>}
     {open && voice && <>
-      <p>Voice is <strong>{voice.enabled ? "on" : "off"}</strong>. Existing four tones and source rules remain in effect.</p>
+      <p>Voice is <strong>{voice.enabled ? "on" : "off"}</strong>. Your chosen tone and the source rules still apply.</p>
       <Button variant="outline" disabled={busy} onClick={() => void mutate({ action: "enable", enabled: !voice.enabled, consent: true })}>{voice.enabled ? "Disable voice guidance" : "Enable approved samples as tone guidance"}</Button>
       <p className="text-xs text-muted-foreground">Up to five samples, 20–1,000 characters each, including removed samples. Remove stops future use and keeps a reversible copy here until you permanently forget it. A request already sent to a provider cannot be recalled.</p>
       <ul className="space-y-3">{voice.samples.map(sample => <li key={sample.id} className="space-y-2 rounded-md border p-3">

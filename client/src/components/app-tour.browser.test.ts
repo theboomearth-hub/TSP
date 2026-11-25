@@ -146,6 +146,7 @@ describe("interactive app tour", () => {
   }, 20000);
 
   it("pauses, resumes across reloads, and isolates workspaces", async () => {
+    await startWorkspaceTour();
     await page.getByRole("button", { name: "Continue without connecting" }).click();
     await nextStep();
     await assertStep("Find a story in Discover");
@@ -155,12 +156,14 @@ describe("interactive app tour", () => {
     await page.getByRole("button", { name: "Reopen tour" }).click();
     await assertStep("Find a story in Discover");
     await page.getByRole("button", { name: "Switch workspace" }).click();
-    await assertStep("Connect an account (optional)");
+    await browserExpect(page.getByTestId("dialog-app-tour")).toHaveCount(0);
+    await startWorkspaceTour();
     await page.getByRole("button", { name: "Switch workspace" }).click();
     await assertStep("Find a story in Discover");
   }, 20000);
 
   it("waits for asynchronously appearing controls and follows a confirmed connection", async () => {
+    await startWorkspaceTour();
     const connection = page.getByTestId("button-connect-linkedin");
     await connection.evaluate(element => element.setAttribute("style", "display: none"));
     await browserExpect(page.getByTestId("dialog-app-tour")).toContainText("Waiting for this control to appear");
@@ -173,7 +176,7 @@ describe("interactive app tour", () => {
   });
 
   it("retains completed actions across reload and pause without advancing automatically", async () => {
-    await assertStep("Connect an account (optional)");
+    await startWorkspaceTour();
     await assertDone(false);
     await page.getByRole("button", { name: "Continue without connecting" }).click();
     await assertStep("Connect an account (optional)");
@@ -201,6 +204,7 @@ describe("interactive app tour", () => {
     const titles = ["Connect an account (optional)", "Find a story in Discover", "Write your document", "Adapt your reviewed document",
       "Choose platforms and generate", "Review and save a version", "Open your saved draft", "Review before publishing",
       "Confirm your publishing choice", "Review your result"];
+    await startWorkspaceTour();
     for (const [index, title] of titles.entries()) {
       await assertStep(title);
       await assertDone(false);
@@ -212,7 +216,20 @@ describe("interactive app tour", () => {
     await browserExpect(page.getByTestId("dialog-app-tour")).toHaveCount(0);
   }, 20000);
 
-  it("lets the user skip setup steps and resumes in the workspace after setup is saved", async () => {
+  it("doesn't open or move the page on a device with no tour progress, and opens from App tour", async () => {
+    await page.goto(`${origin}/dashboard/content`);
+    await browserExpect(page.getByTestId("route")).toHaveText("/dashboard/content");
+    await page.waitForTimeout(300);
+    await browserExpect(page.getByTestId("dialog-app-tour")).toHaveCount(0);
+    await browserExpect(page.getByTestId("route")).toHaveText("/dashboard/content");
+    await startWorkspaceTour();
+    await browserExpect(page.getByTestId("route")).toHaveText("/dashboard/settings");
+    // Now the guide is being followed in this browser, so it resumes after a reload.
+    await page.reload();
+    await assertStep("Connect an account (optional)");
+  });
+
+  it("doesn't pop up after setup when the guide was skipped past it, and reopens at the next step", async () => {
     await page.goto(`${origin}/onboarding`);
     await assertStep("Start by talking to Pundit");
     await nextStep();
@@ -222,8 +239,23 @@ describe("interactive app tour", () => {
     await nextStep();
     await browserExpect(page.getByTestId("dialog-app-tour")).toHaveCount(0);
     await page.getByRole("button", { name: "Start my workspace", exact: true }).click();
+    await browserExpect(page.getByTestId("route")).toHaveText("/dashboard");
+    await browserExpect(page.getByTestId("dialog-app-tour")).toHaveCount(0);
+    await page.reload();
+    await browserExpect(page.getByTestId("dialog-app-tour")).toHaveCount(0);
+    await page.getByRole("button", { name: "Reopen tour" }).click();
     await assertStep("Connect an account (optional)");
   }, 20000);
+
+  it("closes when setup is saved while the guide isn't being followed, in both layouts", async () => {
+    await page.goto(`${origin}/onboarding`);
+    await assertStep("Start by talking to Pundit");
+    await page.getByRole("button", { name: "Start my workspace", exact: true }).click();
+    await browserExpect(page.getByTestId("route")).toHaveText("/dashboard");
+    await browserExpect(page.getByTestId("dialog-app-tour")).toHaveCount(0);
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem("tsp-app-tour:v3:user:a")!))).toMatchObject({ step: 3, dismissed: true });
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem("tsp-app-tour:inbox-v1:user:a")!))).toMatchObject({ dismissed: true });
+  });
 
   for (const outcome of ["scheduled", "published", "manual", "simulated", "attention"]) {
     it(`waits for the exact draft and confirmed ${outcome} result, including inside a modal`, async () => {
@@ -283,6 +315,7 @@ describe("interactive app tour", () => {
 });
 
 async function createAndSave() {
+  await startWorkspaceTour();
   await page.getByRole("button", { name: "Continue without connecting" }).click();
   await nextStep();
   await page.getByRole("button", { name: "Write a post", exact: true }).click();
@@ -303,6 +336,12 @@ async function createAndSave() {
   await page.getByRole("button", { name: "Save draft", exact: true }).click();
   await nextStep();
   await assertStep("Open your saved draft");
+}
+
+/** Setup was done elsewhere, so nothing is saved here: open the guide the way a user would. */
+async function startWorkspaceTour() {
+  await page.getByRole("button", { name: "Reopen tour" }).click();
+  await assertStep("Connect an account (optional)");
 }
 
 async function assertStep(title: string) {

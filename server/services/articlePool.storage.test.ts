@@ -5,7 +5,7 @@ import { requireLocalTestDatabase } from "../../test/database-safety";
 import { pool } from "../db";
 import { ownerDb, ownerPool } from "../../test/db-owner";
 import { pooledArticles, publications } from "@shared/schema";
-import { fetchPooledBody, findPooledArticle, indexHealth, knownUnreadableLinks, markPooledBody, pendingPooledBodies, prunePool, queryArticlePool, registerPublications, storePooledArticles } from "./articlePool";
+import { fetchPooledBody, findPooledArticle, indexHealth, markPooledBody, pendingPooledBodies, prunePool, queryArticlePool, registerPublications, storePooledArticles } from "./articlePool";
 
 // Runs through the tsp_app role, as production does. Rows are tagged so parallel test files never collide.
 const tag = `pool-${randomUUID().slice(0, 8)}`;
@@ -87,7 +87,7 @@ describe("article pool", () => {
     expect(await queryArticlePool({ keywords: [], companies: [], influencers: [] }, { days: 30, limit: 50 })).toEqual([]);
   });
 
-  it("serves the fetched body to generation and to later refreshes, and knows what's unreadable", async () => {
+  it("serves the fetched body to generation and to later refreshes, and records what's unreadable", async () => {
     const url = `${site("pharma")}/nppa-caps-stent-prices`;
     expect((await pendingPooledBodies(100)).map(row => row.canonicalUrl)).toContain(url);
     await markPooledBody(url, { readable: true, content: "The National Pharmaceutical Pricing Authority capped coronary stent prices for a third year. ".repeat(20), title: "NPPA caps stent prices for a third year" });
@@ -97,9 +97,6 @@ describe("article pool", () => {
     expect(article!.content.length).toBeGreaterThan(1000);
     expect(await findPooledArticle(`${site("pharma")}/roche-obesity-drug`)).toMatchObject({ readable: false });
     expect(await findPooledArticle(`${site("pharma")}/never-seen`)).toBeNull();
-    expect(await knownUnreadableLinks([`${site("pharma")}/roche-obesity-drug?utm_source=x`, url, `${site("pharma")}/never-seen`, "not a url"]))
-      .toEqual([`${site("pharma")}/roche-obesity-drug`]);
-    expect(await knownUnreadableLinks([])).toEqual([]);
     expect((await pendingPooledBodies(100)).map(row => row.canonicalUrl)).not.toContain(url);
     const refreshed = await queryArticlePool({ keywords: ["stent prices"], companies: [], influencers: [] }, { days: 30, limit: 50 });
     expect(refreshed.find(article => article.link === url)).toMatchObject({ inputKind: "page_body", title: "NPPA caps stent prices for a third year" });
