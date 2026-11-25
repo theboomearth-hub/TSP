@@ -24,6 +24,7 @@ import { requirePermission } from "./middlewares/requirePermission";
 import { canonicalHostRedirect, canonicalPathRedirect, cloudRunHostNoindex } from "./middlewares/canonicalHost";
 import { captureCors, isCapturePath } from "./services/captureTokens";
 import { INBOUND_EMAIL_PATH, inboundEmailGate, inboundEmailJson } from "./services/inboundEmail";
+import { aiConfigurationProblem } from "./services/openRouter";
 
 export const app = express();
 // Advertises the framework to scanners and serves no client.
@@ -378,6 +379,8 @@ export async function startServer(): Promise<void> {
   void prune();
   invitationMaintenance = setInterval(() => void prune(), 60 * 60 * 1000);
   invitationMaintenance.unref();
+  const aiProblem = aiConfigurationProblem();
+  if (aiProblem) console.warn(`[startup] ${aiProblem}`);
   console.log("[startup] Initializing queues...");
   // Initialize background job queue (if Redis is configured)
   initializeQueues();

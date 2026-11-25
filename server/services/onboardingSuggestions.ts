@@ -93,8 +93,9 @@ USER: ${context(request)}`, z.object({ phrases: z.array(z.string().trim().min(2)
   }
 }
 
-// Who they write for is their audience, not news to follow ("writing for agencies and brands").
-const AUDIENCE_CLAUSE = /\b(?:(?:writing|posting|creating content|speaking|talking|selling)\s+(?:for|to)|reaching|helping)\b[^,.;]*/gi;
+// Who they write for is their audience, not news to follow ("writing for agencies and brands",
+// "and write for brand marketers"), in any tense of the verb.
+const AUDIENCE_CLAUSE = /\b(?:(?:writ(?:e|es|ing)|post(?:s|ing)?|creat(?:e|es|ing) content|speak(?:s|ing)?|talk(?:s|ing)?|sell(?:s|ing)?)\s+(?:for|to)|reach(?:es|ing)?|helping)\b[^,.;]*/gi;
 const LEADING_FILLER = /^(?:(?:a|an|the|my|our|i|we)\s+)+/i;
 
 /** Search phrases (and fallback topics) without the model: the focus split into short clauses. */

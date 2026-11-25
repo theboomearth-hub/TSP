@@ -140,5 +140,8 @@ describe("phrases from the user's own words, when the AI can't help", () => {
     expect(phrasesFromFocus("I lead marketing at a fintech company in India, reaching CFOs and founders.")).toEqual(["fintech company in India"]);
     expect(phrasesFromFocus("I'm the founder of a B2B SaaS startup, writing for CTOs and engineering leaders.")).toEqual(["B2B SaaS startup"]);
     expect(phrasesFromFocus("I advise hospitals on digital transformation and healthcare technology.")).toEqual(["hospitals on digital transformation", "healthcare technology"]);
+    // Any tense: "and write for …" is the audience too, not a topic.
+    expect(phrasesFromFocus("I run marketing for a digital out-of-home advertising company and write for agency and brand marketers in India."))
+      .toEqual(["digital out-of-home advertising company"]);
   });
 });

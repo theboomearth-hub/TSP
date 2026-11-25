@@ -135,6 +135,33 @@ function getProvider(): AIProvider {
   return parseProvider(process.env.AI_PROVIDER || ((process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY) ? "anthropic" : "openrouter"));
 }
 
+// The settings each provider reads its key from, in the order it reads them.
+const PROVIDER_KEYS: Record<AIProvider, readonly string[]> = {
+  anthropic: ["ANTHROPIC_API_KEY", "CLAUDE_API_KEY"],
+  gemini: ["GEMINI_API_KEY", "AI_INTEGRATIONS_GEMINI_API_KEY"],
+  openrouter: ["OPENROUTER_API_KEY", "AI_INTEGRATIONS_GEMINI_API_KEY"],
+  openai: ["OPENAI_API_KEY"],
+};
+
+/**
+ * Why AI writing can't work with these settings, or null when it can. Names settings only, never
+ * values. Checked at start-up: without a key the app runs, but every draft and Pundit's setup fail.
+ */
+export function aiConfigurationProblem(env: NodeJS.ProcessEnv = process.env): string | null {
+  const chosen = env.AI_PROVIDER?.trim();
+  const fallbackDefault = (env.ANTHROPIC_API_KEY || env.CLAUDE_API_KEY) ? "anthropic" : "openrouter";
+  let provider: AIProvider;
+  try {
+    provider = parseProvider(chosen || fallbackDefault);
+  } catch {
+    return `AI_PROVIDER is set to an unsupported provider. Use gemini, openrouter, openai or anthropic.`;
+  }
+  const keys = PROVIDER_KEYS[provider];
+  if (keys.some(name => env[name]?.trim())) return null;
+  const why = chosen ? `AI_PROVIDER is ${provider}` : `AI_PROVIDER isn't set, so the provider defaults to ${provider}`;
+  return `AI writing is off: ${why}, but ${keys.join(" or ")} isn't set. Drafts and Pundit's setup will fail with "AI generation is not configured correctly".`;
+}
+
 /** Non-secret generation identity for cache invalidation; no credentials or URLs. */
 export function getEditorialModelIdentity() {
   return {
